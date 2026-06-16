@@ -1,39 +1,22 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# form-intake-sys
 
-## Getting Started
+ROBO AI Agency intake and builder workspace.
 
-First, run the development server:
+## Structure
+
+- `robo-intake/`: Next.js application
+- `Docs/`: product and build documentation
+- `.github/workflows/vercel-deploy.yml`: Vercel CI/CD workflow
+
+## Local Development
+
+Run the app from `robo-intake/`:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Deployment
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy
-
-This project should be deployed to a Node-compatible platform such as Vercel.
-
-- Deployment guide: [DEPLOY_VERCEL.md](file:///Users/kevche_mini/Robo%20AI%20Agency/form_intake/robo-intake/DEPLOY_VERCEL.md)
-- CI/CD workflow: [.github/workflows/vercel-deploy.yml](file:///Users/kevche_mini/Robo%20AI%20Agency/form_intake/.github/workflows/vercel-deploy.yml)
-
-Plain FTP hosting is not suitable for this application because it relies on Next.js server routes, server-side secrets, payment webhooks, and runtime integrations.
+- App deploy guide: `robo-intake/DEPLOY_VERCEL.md`
+- CI/CD workflow: `.github/workflows/vercel-deploy.yml`
