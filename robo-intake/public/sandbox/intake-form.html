@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ROBO AI Intake — Sandbox Demo</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&family=DM+Sans:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --navy: #0d1b2a;
+        --navy-800: #1e2d3d;
+        --navy-600: #2d4460;
+        --teal: #0ea5a0;
+        --slate: #cbd5e1;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--navy);
+        color: #fff;
+        font-family: "DM Sans", ui-sans-serif, system-ui;
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 40px 16px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        color: var(--teal);
+        font-family: "Syne", ui-sans-serif, system-ui;
+        font-weight: 700;
+      }
+      .title {
+        margin-top: 12px;
+        font-family: "Syne", ui-sans-serif, system-ui;
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .panel {
+        margin-top: 20px;
+        border: 1px solid var(--navy-600);
+        border-radius: 18px;
+        overflow: hidden;
+        background: rgba(30, 45, 61, 0.35);
+      }
+      .chat {
+        height: 520px;
+        overflow: auto;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .row {
+        display: flex;
+      }
+      .row.user {
+        justify-content: flex-end;
+      }
+      .bubble {
+        max-width: 90%;
+        border-radius: 18px;
+        padding: 12px 14px;
+        line-height: 1.6;
+      }
+      .bubble.agent {
+        background: var(--navy-800);
+        border-bottom-left-radius: 6px;
+      }
+      .badge {
+        display: inline-flex;
+        height: 24px;
+        padding: 0 12px;
+        border-radius: 8px;
+        align-items: center;
+        background: #2f5b84;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+      }
+      .helper {
+        margin-top: 10px;
+        color: var(--slate);
+        font-size: 14px;
+        font-style: italic;
+      }
+      .bubble.user {
+        background: var(--navy-600);
+        border-bottom-right-radius: 6px;
+      }
+      .dock {
+        padding: 16px;
+        border-top: 1px solid var(--navy-600);
+        background: var(--navy);
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .chip {
+        border: 1px solid var(--navy-600);
+        background: var(--navy-800);
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .chip:hover {
+        border-color: var(--teal);
+        background: var(--navy-600);
+      }
+      .chip.on {
+        background: var(--teal);
+        color: var(--navy);
+        border-color: var(--teal);
+      }
+      .btn {
+        height: 44px;
+        padding: 0 18px;
+        border-radius: 10px;
+        border: 1px solid var(--navy-600);
+        background: transparent;
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn.primary {
+        background: var(--teal);
+        border-color: var(--teal);
+        color: var(--navy);
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .textareaWrap {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      textarea {
+        width: 100%;
+        resize: none;
+        border-radius: 10px;
+        border: 1px solid var(--navy-600);
+        background: var(--navy-800);
+        color: #fff;
+        padding: 12px 14px;
+        font: inherit;
+        line-height: 1.4;
+      }
+      textarea:focus {
+        outline: none;
+        box-shadow: 0 0 0 4px rgba(14, 165, 160, 0.18);
+      }
+      .typing {
+        display: inline-flex;
+        gap: 4px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--teal);
+        animation: bounce 1s infinite;
+      }
+      .dot:nth-child(2) {
+        animation-delay: 150ms;
+      }
+      .dot:nth-child(3) {
+        animation-delay: 300ms;
+      }
+      @keyframes bounce {
+        0%,
+        80%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.65;
+        }
+        40% {
+          transform: translateY(-5px);
+          opacity: 1;
+        }
+      }
+      .progress {
+        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+      }
+      .pdot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--navy-600);
+      }
+      .pdot.done {
+        background: var(--teal);
+      }
+      .pdot.active {
+        background: var(--teal);
+        box-shadow: 0 0 0 4px rgba(14, 165, 160, 0.18);
+      }
+      pre {
+        background: var(--navy-800);
+        border: 1px solid var(--navy-600);
+        padding: 14px;
+        border-radius: 12px;
+        overflow: auto;
+        color: var(--slate);
+        font-size: 12px;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="brand">ROBO AI Agency</div>
+        <a href="/analyse" style="color: var(--teal); text-decoration: none; font-weight: 700">Live intake</a>
+      </div>
+      <div class="title">Sandbox Demo</div>
+      <div class="progress" id="progress"></div>
+      <div class="panel">
+        <div class="chat" id="chat" aria-live="polite"></div>
+        <div class="dock" id="dock"></div>
+      </div>
+      <h2 class="sr-only">Intake form</h2>
+    </div>
+
+    <script>
+      const TOTAL = 15;
+      const chat = document.getElementById("chat");
+      const dock = document.getElementById("dock");
+      const progress = document.getElementById("progress");
+
+      const state = {
+        idx: 0,
+        answers: {},
+        doneIds: [],
+        profile_id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        started_at: new Date().toISOString(),
+      };
+
+      const QUESTIONS = [
+        {
+          id: "Q-01",
+          field: "industry",
+          type: "chip-single",
+          layer: "CONTEXT",
+          helper: "Pick the closest match — we’ll refine later",
+          text: "Welcome. I’m your ROBO AI analyst. Let’s map your business in about 12 minutes. What industry does your business operate in?",
+          options: [
+            { v: "logistics_supply_chain", l: "Logistics & Supply Chain" },
+            { v: "healthcare_wellness", l: "Healthcare & Wellness" },
+            { v: "real_estate_property", l: "Real Estate & Property" },
+            { v: "retail_ecommerce", l: "Retail & E-commerce" },
+            { v: "professional_services", l: "Professional Services" },
+            { v: "finance_accounting", l: "Finance & Accounting" },
+            { v: "manufacturing_operations", l: "Manufacturing & Operations" },
+            { v: "technology_saas", l: "Technology & SaaS" },
+            { v: "education_training", l: "Education & Training" },
+            { v: "legal", l: "Legal" },
+            { v: "hospitality_events", l: "Hospitality & Events" },
+            { v: "other", l: "Other" },
+          ],
+        },
+        {
+          id: "Q-02",
+          field: "team_size",
+          type: "chip-single",
+          layer: "CONTEXT",
+          text: "How many people are on your team today?",
+          options: [
+            { v: "1", l: "Just me" },
+            { v: "2-5", l: "2–5" },
+            { v: "6-20", l: "6–20" },
+            { v: "21-50", l: "21–50" },
+            { v: "51-200", l: "51–200" },
+            { v: "200+", l: "200+" },
+          ],
+        },
+        {
+          id: "Q-03",
+          field: "revenue_range",
+          type: "chip-single",
+          layer: "CONTEXT",
+          text: "Roughly what revenue range are you in?",
+          options: [
+            { v: "<10k", l: "Under $10k / mo" },
+            { v: "10-50k", l: "$10k–$50k / mo" },
+            { v: "50-200k", l: "$50k–$200k / mo" },
+            { v: "200k-1m", l: "$200k–$1M / mo" },
+            { v: "1m+", l: "$1M+ / mo" },
+          ],
+        },
+        {
+          id: "Q-04",
+          field: "core_ops",
+          type: "free-text",
+          layer: "OPERATIONS & STACK",
+          text: "At a high level, what does a typical week of operations look like for your team?",
+        },
+        {
+          id: "Q-05",
+          type: "free-text",
+          layer: "OPERATIONS & STACK",
+          field: "top_time_cost",
+          text: "What is the single highest-cost task (time or money) your business does repeatedly?",
+        },
+        {
+          id: "Q-06",
+          field: "existing_tools",
+          type: "chip-multi",
+          layer: "OPERATIONS & STACK",
+          text: "Which tools does your team rely on day-to-day?",
+          options: [
+            { v: "excel", l: "Excel / Sheets" },
+            { v: "whatsapp", l: "WhatsApp" },
+            { v: "quickbooks", l: "QuickBooks" },
+            { v: "salesforce", l: "Salesforce" },
+            { v: "hubspot", l: "HubSpot" },
+            { v: "slack", l: "Slack" },
+            { v: "notion", l: "Notion" },
+            { v: "shopify", l: "Shopify" },
+            { v: "gmail", l: "Email (Gmail/Outlook)" },
+            { v: "erp", l: "ERP" },
+            { v: "crm_other", l: "Other CRM" },
+            { v: "none", l: "None / Paper" },
+          ],
+        },
+        {
+          id: "Q-07",
+          field: "data_situation",
+          type: "chip-single",
+          layer: "OPERATIONS & STACK",
+          text: "Where does the data live that runs your operations?",
+          options: [
+            { v: "spreadsheets", l: "Mostly spreadsheets" },
+            { v: "crm", l: "CRM" },
+            { v: "erp", l: "ERP" },
+            { v: "support", l: "Support desk" },
+            { v: "database", l: "Database / warehouse" },
+            { v: "mixed", l: "Mixed / multiple" },
+            { v: "not_sure", l: "Not sure" },
+          ],
+        },
+        {
+          id: "Q-08",
+          field: "bottleneck",
+          type: "free-text",
+          layer: "BOTTLENECK & RISK",
+          text: "What is the single biggest operational bottleneck right now?",
+        },
+        {
+          id: "Q-09",
+          field: "decision_speed",
+          type: "chip-single",
+          layer: "BOTTLENECK & RISK",
+          text: "How quickly can you spot problems or performance changes in the business?",
+          options: [
+            { v: "real_time", l: "Real-time / same day" },
+            { v: "1-2_days", l: "1–2 days" },
+            { v: "weekly", l: "Weekly" },
+            { v: "monthly", l: "Monthly" },
+            { v: "not_sure", l: "Not sure" },
+          ],
+        },
+        {
+          id: "Q-10",
+          field: "risk_areas",
+          type: "chip-multi",
+          layer: "BOTTLENECK & RISK",
+          helper: "Select all that apply",
+          text: "Which risk areas matter most right now?",
+          options: [
+            { v: "compliance", l: "Compliance" },
+            { v: "security", l: "Security" },
+            { v: "cash_flow", l: "Cash flow" },
+            { v: "customer_churn", l: "Customer churn" },
+            { v: "quality", l: "Quality issues" },
+            { v: "ops_errors", l: "Operational errors" },
+            { v: "missed_leads", l: "Missed leads" },
+            { v: "fraud", l: "Fraud" },
+            { v: "safety", l: "Safety" },
+            { v: "other", l: "Other" },
+          ],
+        },
+        {
+          id: "Q-11",
+          field: "prior_ai_experience",
+          type: "chip-single",
+          layer: "READINESS & CLOSING",
+          text: "Have you tried AI tools or automation before?",
+          options: [
+            { v: "yes", l: "Yes" },
+            { v: "tried", l: "Tried but abandoned" },
+            { v: "no", l: "No" },
+          ],
+        },
+        {
+          id: "Q-12",
+          field: "budget_comfort",
+          type: "chip-single",
+          layer: "READINESS & CLOSING",
+          text: "What monthly budget feels comfortable for an AI solution?",
+          options: [
+            { v: "<500", l: "Under $500/mo" },
+            { v: "500-2k", l: "$500–$2,000/mo" },
+            { v: "2k-5k", l: "$2k–$5k/mo" },
+            { v: "5k-15k", l: "$5k–$15k/mo" },
+            { v: "15k+", l: "$15k+/mo" },
+          ],
+        },
+        {
+          id: "Q-13",
+          field: "urgency_flag",
+          type: "chip-single",
+          layer: "READINESS & CLOSING",
+          text: "How urgent is this for you?",
+          options: [
+            { v: "0-30d", l: "ASAP (0–30 days)" },
+            { v: "this_quarter", l: "This quarter" },
+            { v: "next_6_months", l: "Next 6 months" },
+            { v: "exploring", l: "Just exploring" },
+          ],
+        },
+        {
+          id: "Q-14",
+          field: "success_definition",
+          type: "free-text",
+          layer: "READINESS & CLOSING",
+          text: "Define success: 6 months from now, what would make you say this was worth it?",
+        },
+        {
+          id: "Q-15",
+          field: "website_url",
+          type: "free-text",
+          layer: "READINESS & CLOSING",
+          text: "What is your business website URL? (Optional)",
+        },
+      ];
+
+      function renderProgress() {
+        progress.innerHTML = "";
+        for (let i = 0; i < TOTAL; i++) {
+          const d = document.createElement("div");
+          d.className = "pdot";
+          if (i < state.idx) d.classList.add("done");
+          if (i === state.idx) d.classList.add("active");
+          progress.appendChild(d);
+        }
+      }
+
+      function addBubble(side, text, kind) {
+        const row = document.createElement("div");
+        row.className = "row " + (side === "user" ? "user" : "agent");
+        const bubble = document.createElement("div");
+        bubble.className = "bubble " + (side === "user" ? "user" : "agent");
+        if (kind === "typing") {
+          bubble.innerHTML = '<span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
+        } else {
+          bubble.textContent = text;
+        }
+        row.appendChild(bubble);
+        chat.appendChild(row);
+        chat.scrollTop = chat.scrollHeight;
+        return { row, bubble };
+      }
+
+      function personalize(text) {
+        return text
+          .replaceAll("{industry}", state.answers.industry || "your")
+          .replaceAll("{team_size}", state.answers.team_size || "your")
+          .replaceAll("{revenue_range}", state.answers.revenue_range || "your");
+      }
+
+      function addAgentQuestion(question) {
+        const row = document.createElement("div");
+        row.className = "row agent";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble agent";
+        const badge = question.layer ? `<div class="badge">${question.layer}</div>` : "";
+        const helper = question.helper ? `<div class="helper">${question.helper}</div>` : "";
+        bubble.innerHTML = `${badge}<div style="margin-top:12px; white-space: pre-line;">${personalize(question.text)}</div>${helper}`;
+        row.appendChild(bubble);
+        chat.appendChild(row);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      function renderDock(question) {
+        dock.innerHTML = "";
+        if (!question) return;
+
+        if (question.type === "chip-single") {
+          const wrap = document.createElement("div");
+          wrap.className = "chips";
+          question.options.forEach((o) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "chip";
+            btn.textContent = o.l;
+            btn.onclick = () => onAnswered(question, o.v, o.l);
+            wrap.appendChild(btn);
+          });
+          dock.appendChild(wrap);
+          return;
+        }
+
+        if (question.type === "chip-multi") {
+          const wrap = document.createElement("div");
+          wrap.className = "chips";
+          const selected = {};
+          question.options.forEach((o) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "chip";
+            btn.textContent = o.l;
+            btn.onclick = () => {
+              selected[o.v] = !selected[o.v];
+              btn.classList.toggle("on", Boolean(selected[o.v]));
+              cont.disabled = Object.keys(selected).filter((k) => selected[k]).length === 0;
+            };
+            wrap.appendChild(btn);
+          });
+          dock.appendChild(wrap);
+          const cont = document.createElement("button");
+          cont.type = "button";
+          cont.className = "btn primary";
+          cont.style.marginTop = "14px";
+          cont.textContent = "Continue";
+          cont.disabled = true;
+          cont.onclick = () => {
+            const values = Object.keys(selected).filter((k) => selected[k]);
+            const labels = values.map((v) => question.options.find((o) => o.v === v)?.l || v);
+            onAnswered(question, values, labels.join(", "));
+          };
+          dock.appendChild(cont);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "textareaWrap";
+        const ta = document.createElement("textarea");
+        ta.rows = 1;
+        ta.placeholder = "Type your answer...";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn primary";
+        btn.textContent = "Send";
+        btn.disabled = true;
+        function refresh() {
+          btn.disabled = ta.value.trim().length === 0;
+          ta.style.height = "auto";
+          ta.style.height = Math.min(ta.scrollHeight, 5 * 24) + "px";
+        }
+        ta.addEventListener("input", refresh);
+        ta.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            if (btn.disabled) return;
+            const val = ta.value.trim();
+            ta.value = "";
+            refresh();
+            onAnswered(question, val, val);
+          }
+        });
+        btn.onclick = () => {
+          if (btn.disabled) return;
+          const val = ta.value.trim();
+          ta.value = "";
+          refresh();
+          onAnswered(question, val, val);
+        };
+        wrap.appendChild(ta);
+        wrap.appendChild(btn);
+        dock.appendChild(wrap);
+        ta.focus();
+      }
+
+      async function askCurrent() {
+        renderProgress();
+        const q = QUESTIONS[state.idx];
+        if (!q) return showDone();
+        const typing = addBubble("agent", "", "typing");
+        await new Promise((r) => setTimeout(r, 900 + Math.floor(Math.random() * 400)));
+        typing.row.remove();
+        addAgentQuestion(q);
+        renderDock(q);
+      }
+
+      function onAnswered(question, value, display) {
+        state.answers[question.field] = value;
+        state.doneIds.push(question.id);
+        addBubble("user", display);
+        state.idx += 1;
+        askCurrent();
+      }
+
+      function showDone() {
+        renderProgress();
+        dock.innerHTML = "";
+        addBubble("agent", "All set. Here is the JSON output.");
+        const payload = {
+          profile_id: state.profile_id,
+          timestamp: new Date().toISOString(),
+          answers: state.answers,
+        };
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(payload, null, 2);
+        dock.appendChild(pre);
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.gap = "10px";
+        row.style.marginTop = "12px";
+        const download = document.createElement("button");
+        download.type = "button";
+        download.className = "btn primary";
+        download.textContent = "Download JSON";
+        download.onclick = () => {
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "sandbox_intake.json";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        };
+        const reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "btn";
+        reset.textContent = "Start over";
+        reset.onclick = () => {
+          chat.innerHTML = "";
+          state.idx = 0;
+          state.answers = {};
+          state.doneIds = [];
+          state.profile_id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+          state.started_at = new Date().toISOString();
+          start();
+        };
+        row.appendChild(download);
+        row.appendChild(reset);
+        dock.appendChild(row);
+      }
+
+      function start() {
+        chat.innerHTML = "";
+        askCurrent();
+      }
+
+      start();
+    </script>
+  </body>
+</html>
