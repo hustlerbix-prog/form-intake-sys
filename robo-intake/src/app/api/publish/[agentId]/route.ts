@@ -5,6 +5,8 @@ import { generateIntegrationPackage } from "@/lib/publish/package";
 import { PublishAgentSchema } from "@/lib/payment/schemas";
 import { randomBytes } from "crypto";
 
+export const maxDuration = 60;
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { agentId: string } }

@@ -3,6 +3,8 @@ import { getAgent, getPublishedSnapshot, searchKb } from "@/lib/server/builderSt
 import { callConfiguredLlm } from "@/lib/server/llmClient";
 import { z } from "zod";
 
+export const maxDuration = 60;
+
 const BodySchema = z.object({
   messages: z
     .array(
