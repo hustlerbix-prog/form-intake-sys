@@ -34,7 +34,10 @@ const DEFAULTS: Stored = {
 };
 
 function dataPath(): string {
-  return `${process.cwd()}/.data/admin_settings.enc`;
+  // On Vercel only /tmp is writable; settings written there are per-instance and ephemeral.
+  // Use SETTINGS_ENCRYPTION_KEY + env-var-based config when possible on stateless runtimes.
+  const dir = process.env.VERCEL ? "/tmp/robo-data" : `${process.cwd()}/.data`;
+  return `${dir}/admin_settings.enc`;
 }
 
 function normalizeKey(): Buffer | null {
@@ -111,7 +114,8 @@ export async function saveAdminSettings(input: Stored): Promise<{ stored: Stored
   const key = normalizeKey();
   if (!key) return { stored, persisted: false };
 
-  await mkdir(`${process.cwd()}/.data`, { recursive: true });
+  const dir = process.env.VERCEL ? "/tmp/robo-data" : `${process.cwd()}/.data`;
+  await mkdir(dir, { recursive: true });
   await writeFile(dataPath(), encryptJson(stored, key));
   return { stored, persisted: true };
 }

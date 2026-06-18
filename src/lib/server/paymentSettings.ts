@@ -80,7 +80,8 @@ const DEFAULTS: Stored = {
 };
 
 function dataPath(): string {
-  return `${process.cwd()}/.data/payment_settings.enc`;
+  const dir = process.env.VERCEL ? "/tmp/robo-data" : `${process.cwd()}/.data`;
+  return `${dir}/payment_settings.enc`;
 }
 
 function normalizeKey(): Buffer | null {
@@ -160,7 +161,8 @@ export async function savePaymentSettings(
   const key = normalizeKey();
   if (!key) return { stored, persisted: false };
 
-  await mkdir(`${process.cwd()}/.data`, { recursive: true });
+  const dir = process.env.VERCEL ? "/tmp/robo-data" : `${process.cwd()}/.data`;
+  await mkdir(dir, { recursive: true });
   await writeFile(dataPath(), encryptJson(stored, key));
   return { stored, persisted: true };
 }

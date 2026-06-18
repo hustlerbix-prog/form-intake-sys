@@ -1,6 +1,76 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { getSupabaseBrowser } from "@/lib/supabase/browser";
 
 export default function Home() {
+  const router = useRouter();
+  const supabase = useMemo(() => getSupabaseBrowser(), []);
+  const [authReady, setAuthReady] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) {
+      router.replace("/login");
+      return;
+    }
+
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (!data.session) {
+        router.replace("/login");
+        return;
+      }
+
+      setUserEmail(data.session.user.email ?? null);
+      setAuthReady(true);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (!session) {
+        setAuthReady(false);
+        setUserEmail(null);
+        router.replace("/login");
+        return;
+      }
+
+      setUserEmail(session.user.email ?? null);
+      setAuthReady(true);
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [router, supabase]);
+
+  async function handleSignOut() {
+    if (!supabase) {
+      router.replace("/login");
+      return;
+    }
+
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-navy px-6 text-center text-slateText">
+        <div className="max-w-md">
+          <p className="font-syne text-3xl font-bold text-white">ROBO AI Agency</p>
+          <p className="mt-4 text-sm uppercase tracking-[0.3em] text-teal">Validating access</p>
+          <p className="mt-3 text-sm text-slateText/70">Redirecting to the secure login if no active session is found.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Skip to main content — accessibility */}
@@ -36,13 +106,28 @@ export default function Home() {
             </Link>
           </div>
 
-          <Link
-            href="/analyse"
-            className="inline-flex items-center justify-center rounded-lg bg-teal px-5 h-10 text-sm font-bold text-navy hover:brightness-110 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-navy"
-            style={{ touchAction: "manipulation" }}
-          >
-            Start Free Intake
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/admin/settings"
+              className="hidden sm:inline-flex items-center justify-center rounded-lg border border-teal/30 px-4 h-10 text-sm font-semibold text-teal hover:bg-teal/10 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-navy"
+            >
+              Admin
+            </Link>
+            <Link
+              href="/analyse"
+              className="inline-flex items-center justify-center rounded-lg bg-teal px-5 h-10 text-sm font-bold text-navy hover:brightness-110 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-navy"
+              style={{ touchAction: "manipulation" }}
+            >
+              Start Free Intake
+            </Link>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="hidden sm:inline-flex items-center justify-center rounded-lg border border-navy-500 px-4 h-10 text-sm font-semibold text-slateText hover:border-teal/30 hover:text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-navy"
+            >
+              Sign out
+            </button>
+          </div>
         </nav>
       </header>
 
@@ -63,6 +148,9 @@ export default function Home() {
           </div>
 
           <div className="relative max-w-4xl">
+            <p className="mb-4 text-xs uppercase tracking-[0.28em] text-teal/80">
+              Logged in{userEmail ? ` as ${userEmail}` : ""}
+            </p>
             <p className="mb-4 inline-block rounded-full border border-teal/30 bg-teal/10 px-4 py-1 text-xs font-semibold uppercase tracking-widest text-teal">
               AI&#x2011;Powered Business Automation
             </p>
@@ -324,6 +412,13 @@ export default function Home() {
             <Link href="/admin/settings" className="hover:text-slateText transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal rounded">
               Admin
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="hover:text-slateText transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-teal rounded"
+            >
+              Sign out
+            </button>
           </nav>
         </div>
       </footer>
