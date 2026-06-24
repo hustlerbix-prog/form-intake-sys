@@ -3,16 +3,34 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+type ProviderPoolEntry = {
+  provider: "anthropic" | "openrouter" | "openai" | "gemini" | "deepseek" | "moonshot";
+  model: string;
+  baseUrl: string | null;
+  apiKey: string | null;
+};
+
 type AiSettings = {
   enabled: boolean;
-  provider: "anthropic" | "openrouter";
+  provider: "anthropic" | "openrouter" | "openai" | "gemini" | "deepseek" | "moonshot";
   model: string;
   baseUrl: string | null;
   maxOutputTokens: number;
   temperature: number;
   timeoutMs: number;
   apiKey: string | null;
+  poolStrategy: "off" | "cascade" | "race";
+  providerPool: ProviderPoolEntry[];
 };
+
+const FREE_MODEL_PRESETS: { label: string; entry: ProviderPoolEntry }[] = [
+  { label: "Gemma 4 31B", entry: { provider: "openrouter", model: "google/gemma-4-31b-it:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
+  { label: "Nemotron 120B", entry: { provider: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
+  { label: "Qwen3 80B", entry: { provider: "openrouter", model: "qwen/qwen3-next-80b-a3b-instruct:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
+  { label: "Nex-N2 Pro", entry: { provider: "openrouter", model: "nex-agi/nex-n2-pro:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
+  { label: "Gemini 2.0 Flash", entry: { provider: "gemini", model: "gemini-2.0-flash", baseUrl: null, apiKey: null } },
+  { label: "DeepSeek Chat", entry: { provider: "deepseek", model: "deepseek-chat", baseUrl: null, apiKey: null } },
+];
 
 type SettingsResponse = { persisted: boolean; ai: AiSettings };
 
@@ -23,12 +41,33 @@ const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
     { value: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)" },
   ],
   openrouter: [
-    { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
-    { value: "openai/gpt-4o", label: "GPT-4o" },
-    { value: "anthropic/claude-3-5-haiku", label: "Claude 3.5 Haiku (via OpenRouter)" },
-    { value: "google/gemini-flash-1.5", label: "Gemini Flash 1.5" },
-    { value: "meta-llama/llama-3.1-8b-instruct:free", label: "Llama 3.1 8B (free tier)" },
-    { value: "mistralai/mistral-7b-instruct:free", label: "Mistral 7B (free tier)" },
+    { value: "google/gemma-4-31b-it:free", label: "Gemma 4 31B (free) — recommended" },
+    { value: "nvidia/nemotron-3-super-120b-a12b:free", label: "Nemotron 3 Super 120B (free) — most capable" },
+    { value: "nex-agi/nex-n2-pro:free", label: "Nex-N2-Pro 397B MoE (free)" },
+    { value: "qwen/qwen3-next-80b-a3b-instruct:free", label: "Qwen3 80B (free)" },
+    { value: "openai/gpt-4o-mini", label: "GPT-4o Mini (paid)" },
+    { value: "openai/gpt-4o", label: "GPT-4o (paid)" },
+    { value: "anthropic/claude-3-5-haiku", label: "Claude 3.5 Haiku via OpenRouter (paid)" },
+  ],
+  openai: [
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+  ],
+  gemini: [
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash — free 15 RPM (recommended)" },
+    { value: "gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash Preview — free 10 RPM" },
+    { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash — free 15 RPM" },
+    { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro — free 2 RPM (slow for 4 passes)" },
+  ],
+  deepseek: [
+    { value: "deepseek-chat", label: "DeepSeek Chat" },
+    { value: "deepseek-reasoner", label: "DeepSeek Reasoner" },
+  ],
+  moonshot: [
+    { value: "kimi-k2-0711-preview", label: "Kimi k2 (latest, requires temp=1)" },
+    { value: "moonshot-v1-8k", label: "Moonshot v1 (8k)" },
+    { value: "moonshot-v1-32k", label: "Moonshot v1 (32k)" },
+    { value: "moonshot-v1-128k", label: "Moonshot v1 (128k)" },
   ],
 };
 
@@ -101,6 +140,37 @@ export default function AdminSettingsPage() {
   }, [ai, headers, token]);
 
   const isAnthropic = ai?.provider === "anthropic";
+  const baseUrlPlaceholder = (() => {
+    if (!ai) return "";
+    if (ai.provider === "openrouter") return "https://openrouter.ai/api/v1";
+    if (ai.provider === "openai") return "https://api.openai.com/v1";
+    if (ai.provider === "gemini") return "https://generativelanguage.googleapis.com/v1beta/openai";
+    if (ai.provider === "deepseek") return "https://api.deepseek.com/v1";
+    if (ai.provider === "moonshot") return "https://api.moonshot.cn/v1";
+    return "";
+  })();
+
+  const apiKeyLabel = (() => {
+    if (!ai) return "API key";
+    if (ai.provider === "anthropic") return "Anthropic API key (optional — uses env var if empty)";
+    if (ai.provider === "openrouter") return "OpenRouter API key";
+    if (ai.provider === "openai") return "OpenAI API key";
+    if (ai.provider === "gemini") return "Gemini API key";
+    if (ai.provider === "deepseek") return "DeepSeek API key";
+    if (ai.provider === "moonshot") return "Moonshot (Kimi) API key";
+    return "API key";
+  })();
+
+  const apiKeyPlaceholder = (() => {
+    if (!ai) return "";
+    if (ai.provider === "anthropic") return "sk-ant-… (or leave blank to use ANTHROPIC_API_KEY env var)";
+    if (ai.provider === "openrouter") return "sk-or-…";
+    if (ai.provider === "openai") return "sk-…";
+    if (ai.provider === "gemini") return "AIza…";
+    if (ai.provider === "deepseek") return "sk-…";
+    if (ai.provider === "moonshot") return "sk-…";
+    return "";
+  })();
 
   return (
     <div className="px-6 py-10">
@@ -180,13 +250,29 @@ export default function AdminSettingsPage() {
                         ...ai,
                         provider: e.target.value as AiSettings["provider"],
                         model: PROVIDER_MODELS[e.target.value]?.[0]?.value ?? ai.model,
-                        baseUrl: null,
+                        baseUrl:
+                          e.target.value === "anthropic"
+                            ? null
+                            : ((
+                                p: string
+                              ) => {
+                                if (p === "openrouter") return "https://openrouter.ai/api/v1";
+                                if (p === "openai") return "https://api.openai.com/v1";
+                                if (p === "gemini") return "https://generativelanguage.googleapis.com/v1beta/openai";
+                                if (p === "deepseek") return "https://api.deepseek.com/v1";
+                                if (p === "moonshot") return "https://api.moonshot.cn/v1";
+                                return null;
+                              })(e.target.value),
                       })
                     }
                     className="h-11 w-full rounded-lg border border-slate-600 bg-slate-700 px-3 text-sm text-slate-50"
                   >
                     <option value="anthropic">Anthropic (direct)</option>
                     <option value="openrouter">OpenRouter (proxy)</option>
+                    <option value="openai">OpenAI (ChatGPT)</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="moonshot">Kimi (Moonshot)</option>
                   </select>
                   {isAnthropic && (
                     <p className="mt-1 text-xs text-slate-400">
@@ -236,7 +322,7 @@ export default function AdminSettingsPage() {
                     value={ai.baseUrl ?? ""}
                     onChange={(e) => setAi({ ...ai, baseUrl: e.target.value.trim() || null })}
                     className="h-11 w-full rounded-lg border border-slate-600 bg-slate-700 px-3 text-sm text-slate-50 placeholder:text-slate-300"
-                    placeholder="https://openrouter.ai/api/v1"
+                    placeholder={baseUrlPlaceholder}
                     spellCheck={false}
                   />
                 </Field>
@@ -272,17 +358,116 @@ export default function AdminSettingsPage() {
                     inputMode="numeric"
                     placeholder="60000"
                   />
-                  <p className="mt-1 text-xs text-slate-300">60000 recommended. Analyzer runs 4 sequential passes.</p>
+                  <p className="mt-1 text-xs text-slate-300">60000 for fast models (Anthropic/GPT). Use 120000 for slow models (Kimi k2, DeepSeek). Analyzer runs 4 sequential passes.</p>
                 </Field>
               </div>
 
+              {/* Provider Pool */}
+              <div className="rounded-lg border border-slate-600 bg-slate-900/40 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Provider Pool</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      When a model is rate-limited or down, the pool automatically tries others.
+                    </p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {(["off", "cascade", "race"] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => ai && setAi({ ...ai, poolStrategy: s })}
+                        className={
+                          "px-3 py-1 rounded text-xs font-semibold transition border " +
+                          (ai?.poolStrategy === s
+                            ? "bg-teal border-teal text-navy"
+                            : "border-slate-600 text-slate-300 hover:border-slate-400")
+                        }
+                      >
+                        {s === "off" ? "Off" : s === "cascade" ? "Cascade" : "Race"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {ai?.poolStrategy !== "off" && (
+                  <>
+                    <p className="text-xs text-slate-400">
+                      {ai?.poolStrategy === "cascade"
+                        ? "Cascade: tries each model in order until one responds. Saves API quota."
+                        : "Race: fires all models in parallel, returns the fastest valid response. Best reliability."}
+                    </p>
+
+                    {/* Quick-add presets */}
+                    <div>
+                      <p className="text-xs font-semibold text-slate-300 mb-1.5">Quick-add free models:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {FREE_MODEL_PRESETS.map((preset) => {
+                          const inPool = (ai?.providerPool ?? []).some((e) => e.model === preset.entry.model);
+                          return (
+                            <button
+                              key={preset.entry.model}
+                              type="button"
+                              onClick={() => {
+                                if (!ai) return;
+                                if (inPool) {
+                                  setAi({ ...ai, providerPool: ai.providerPool.filter((e) => e.model !== preset.entry.model) });
+                                } else {
+                                  setAi({ ...ai, providerPool: [...(ai.providerPool ?? []), preset.entry] });
+                                }
+                              }}
+                              className={
+                                "text-xs px-2.5 py-1 rounded border transition " +
+                                (inPool
+                                  ? "border-teal bg-teal/15 text-teal"
+                                  : "border-slate-500 bg-slate-800 text-slate-300 hover:border-slate-300")
+                              }
+                            >
+                              {inPool ? "✓ " : "+ "}{preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Current pool */}
+                    {(ai?.providerPool ?? []).length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-300 mb-1.5">
+                          Pool ({ai?.poolStrategy === "cascade" ? "tried in order" : "all fired in parallel"}):
+                        </p>
+                        <div className="flex flex-col gap-1">
+                          {(ai?.providerPool ?? []).map((entry, i) => (
+                            <div key={i} className="flex items-center gap-2 rounded bg-slate-800 px-3 py-1.5">
+                              <span className="text-xs text-slate-400 w-4 shrink-0">{i + 1}.</span>
+                              <span className="text-xs font-mono text-slate-200 flex-1 truncate">{entry.model}</span>
+                              <span className="text-xs text-slate-500 shrink-0">{entry.provider}</span>
+                              <button
+                                type="button"
+                                onClick={() => ai && setAi({ ...ai, providerPool: ai.providerPool.filter((_, j) => j !== i) })}
+                                className="text-slate-500 hover:text-red-400 text-xs ml-1 transition"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          OpenRouter pool entries share your OpenRouter API key. Gemini/DeepSeek entries use their own env var or you can set a key below.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
               {/* API key */}
-              <Field label={isAnthropic ? "Anthropic API key (optional — uses env var if empty)" : "OpenRouter API key"}>
+              <Field label={apiKeyLabel}>
                 <input
                   value={ai.apiKey ?? ""}
                   onChange={(e) => setAi({ ...ai, apiKey: e.target.value || null })}
                   className="h-11 w-full rounded-lg border border-slate-600 bg-slate-700 px-3 text-sm text-slate-50 placeholder:text-slate-300"
-                  placeholder={isAnthropic ? "sk-ant-… (or leave blank to use ANTHROPIC_API_KEY env var)" : "sk-or-…"}
+                  placeholder={apiKeyPlaceholder}
                   type="password"
                   autoComplete="off"
                   spellCheck={false}

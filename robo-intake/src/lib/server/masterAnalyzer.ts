@@ -527,7 +527,263 @@ function buildBeforeAfter(input: { language: Language; gaps: OperationalGap[]; r
   };
 }
 
+/* ── In-house rule-based analyzer (runs when LLM is unavailable or unset) ── */
+
+const GAP_SIGNALS: Array<{
+  pattern: RegExp;
+  gap_id: string;
+  en: string;
+  es: string;
+  severity: number;
+}> = [
+  { pattern: /manual|spreadsheet|excel|copy.?past|data.?entry|hoja.?c[áa]lculo|entrada.?manual/i, gap_id: "manual_data_entry", en: "Manual data entry and spreadsheet-driven workflows consuming significant team capacity that could be automated.", es: "Entrada manual de datos y flujos en hojas de cálculo consumen capacidad operativa que puede automatizarse.", severity: 8 },
+  { pattern: /schedul|appointment|booking|calendar|cita|agend|reserv/i, gap_id: "scheduling_bottleneck", en: "Appointment scheduling handled manually, creating delays and missed follow-ups.", es: "Agendamiento de citas gestionado manualmente, generando retrasos y oportunidades perdidas.", severity: 7 },
+  { pattern: /customer.?support|ticket|inquiry|complaint|soporte|consulta|queja|atenci[oó]n.?cliente/i, gap_id: "customer_support_load", en: "High volume of repetitive customer inquiries handled manually, preventing focus on higher-value work.", es: "Alto volumen de consultas repetitivas atendidas manualmente, impidiendo el enfoque en trabajo de mayor valor.", severity: 8 },
+  { pattern: /follow.?up|lead|pipeline|prospecto|seguimiento/i, gap_id: "lead_follow_up", en: "Lead follow-up and sales pipeline lacking automation, resulting in missed conversions.", es: "Seguimiento de prospectos y pipeline sin automatización, resultando en conversiones perdidas.", severity: 7 },
+  { pattern: /report|dashboard|analytic|kpi|inform|reporte|tablero/i, gap_id: "reporting_manual", en: "Business reporting produced manually, limiting visibility and decision speed.", es: "Reportes generados manualmente, limitando visibilidad y velocidad de decisión.", severity: 6 },
+  { pattern: /invoice|billing|payment|factur|cobro/i, gap_id: "billing_workflow", en: "Invoicing and payment collection managed manually, creating cash-flow delays.", es: "Facturación y cobro gestionados manualmente, generando retrasos en el flujo de caja.", severity: 7 },
+  { pattern: /inventory|stock|supply|inventario|existencias/i, gap_id: "inventory_management", en: "Inventory managed without automation, increasing risk of stockouts and overstock.", es: "Inventario sin automatización, aumentando el riesgo de quiebres de stock.", severity: 7 },
+  { pattern: /onboard|training|hiring|capacitaci[oó]n|incorporaci[oó]n/i, gap_id: "onboarding_ops", en: "Employee onboarding executed manually, slowing time-to-productivity for new hires.", es: "Incorporación de empleados manual, reduciendo la velocidad de adaptación de nuevos ingresos.", severity: 6 },
+];
+
+function detectRuleBasedGaps(submission: CanonicalSubmissionJson): OperationalGap[] {
+  const formText = [
+    submission.pain_points.top_time_cost ?? "",
+    submission.pain_points.bottleneck ?? "",
+    submission.pain_points.data_situation ?? "",
+  ].join(" ");
+  const scrapeText = [
+    submission.website_scrape?.ai_summary ?? "",
+    submission.website_scrape?.content_summary ?? "",
+  ].join(" ");
+  const gaps: OperationalGap[] = [];
+  for (const sig of GAP_SIGNALS) {
+    const inForm = sig.pattern.test(formText);
+    const inScrape = sig.pattern.test(scrapeText);
+    if (!inForm && !inScrape) continue;
+    gaps.push({
+      gap_id: sig.gap_id,
+      description: submission.language === "es" ? sig.es : sig.en,
+      severity_score: sig.severity,
+      evidence_source: inForm && inScrape ? "both" : inScrape ? "scrape" : "form",
+    });
+    if (gaps.length >= 3) break;
+  }
+  if (gaps.length === 0) {
+    gaps.push(
+      submission.pain_points.top_time_cost
+        ? { gap_id: "operational_inefficiency", description: submission.language === "es" ? `Ineficiencia operativa en: ${submission.pain_points.top_time_cost.slice(0, 140)}` : `Operational inefficiency in: ${submission.pain_points.top_time_cost.slice(0, 140)}`, severity_score: 7, evidence_source: "form" }
+        : { gap_id: "process_visibility", description: submission.language === "es" ? "Baja visibilidad de procesos y ausencia de métricas operativas consistentes." : "Low process visibility and absence of consistent operational metrics.", severity_score: 6, evidence_source: "inferred" }
+    );
+  }
+  return gaps;
+}
+
+function buildRuleBasedSummary(submission: CanonicalSubmissionJson): string {
+  const lang = submission.language;
+  const ind = submission.business.industry ?? (lang === "es" ? "negocio" : "business");
+  const team = submission.business.team_size;
+  const rev = submission.business.revenue_range;
+  const timeCost = submission.pain_points.top_time_cost;
+  const bottleneck = submission.pain_points.bottleneck;
+  const dataSit = submission.pain_points.data_situation;
+  const tools = (submission.tools.existing_tools ?? []).slice(0, 3).join(", ");
+  const aiExpRaw = submission.pain_points.prior_ai_experience;
+  const success = submission.goals.success_definition;
+  const scrape = submission.website_scrape;
+
+  const aiNote = aiExpRaw === false || aiExpRaw === null
+    ? (lang === "es" ? "Sin experiencia previa en IA, la organización está en etapa inicial de adopción." : "With no prior AI exposure, the organisation is at an early adoption stage.")
+    : aiExpRaw === true
+    ? (lang === "es" ? "Con experiencia previa en IA, el equipo está listo para despliegues productivos." : "Having explored AI tools, the team is ready for production-grade deployments.")
+    : (lang === "es" ? "El equipo cuenta con experiencia operativa en tecnología." : "The team has operational technology experience.");
+
+  const webNote = scrape?.scrape_status === "success" && scrape.content_summary
+    ? (lang === "es" ? ` Su presencia web indica: ${scrape.content_summary.slice(0, 100)}.` : ` Web presence indicates: ${scrape.content_summary.slice(0, 100)}.`)
+    : "";
+
+  const parts = lang === "es"
+    ? [
+        `Negocio del sector ${ind}${team ? ` con ${team} empleados` : ""}${rev ? ` y facturación en el rango ${rev}` : ""}.`,
+        timeCost ? `Principal consumidor de tiempo: ${timeCost.slice(0, 130)}.` : "",
+        bottleneck ? `Cuello de botella identificado: ${bottleneck.slice(0, 130)}.` : "",
+        tools ? `Herramientas en uso: ${tools}.` : "No se reportan herramientas digitales consolidadas.",
+        dataSit ? `Situación de datos: ${dataSit.slice(0, 100)}.` : "",
+        aiNote, webNote,
+        success ? `Visión de éxito declarada: ${success.slice(0, 120)}.` : "",
+      ]
+    : [
+        `${ind.charAt(0).toUpperCase() + ind.slice(1)} business${team ? ` with ${team}` : ""}${rev ? `, revenue in the ${rev} range` : ""}.`,
+        timeCost ? `Primary time cost: ${timeCost.slice(0, 130)}.` : "",
+        bottleneck ? `Core bottleneck: ${bottleneck.slice(0, 130)}.` : "",
+        tools ? `Current toolset includes ${tools}.` : "No consolidated digital toolset reported.",
+        dataSit ? `Data situation: ${dataSit.slice(0, 100)}.` : "",
+        aiNote, webNote,
+        success ? `Declared success definition: ${success.slice(0, 120)}.` : "",
+      ];
+  return parts.filter(Boolean).join(" ").slice(0, 1000);
+}
+
+function scoreRuleBasedProducts(
+  submission: CanonicalSubmissionJson,
+  gaps: OperationalGap[],
+  readinessScore: number,
+  budgetBand: string,
+): RecommendedProduct[] {
+  const lang = submission.language;
+  const ind = (submission.business.industry ?? "").toLowerCase();
+  const gapIds = new Set(gaps.map((g) => g.gap_id));
+  const aiExpRaw = submission.pain_points.prior_ai_experience;
+  const scores = new Map<string, { score: number; en: string; es: string; driver: string }>();
+
+  function add(id: string, delta: number, en: string, es: string, driver: string) {
+    const cur = scores.get(id);
+    scores.set(id, cur ? { ...cur, score: cur.score + delta } : { score: delta, en, es, driver });
+  }
+
+  if (readinessScore < 40) {
+    add("CS-01", 6, "AI Readiness Audit is the right first step — low readiness requires structured assessment before tooling.", "La Auditoría de Madurez IA es el primer paso correcto — la baja madurez requiere evaluación estructurada antes de implementar herramientas.", "risk_reduction");
+    add("IS-01", 4, "AI Onboarding Sprint delivers the fastest path from audit to live deployment.", "El Sprint de Incorporación IA ofrece la ruta más rápida de auditoría a despliegue productivo.", "speed_to_value");
+  }
+  if (["retail", "hospitality", "education"].includes(ind)) add("CB-01", 5, "High-volume customer interactions in this industry make a customer-facing chatbot the highest-ROI first deployment.", "Las interacciones de alto volumen en este sector hacen del chatbot la primera implementación de mayor ROI.", "customer_engagement");
+  if (["healthcare", "logistics", "hospitality"].includes(ind)) add("AVA-01", 4, "Phone and appointment management is operationally critical in this industry — voice AI handles it at scale.", "La gestión de llamadas y citas es crítica en este sector — la IA de voz lo maneja a escala.", "call_deflection");
+  if (["finance", "professional", "manufacturing", "technology"].includes(ind)) add("CA-01", 5, "Internal analytics and decision support align directly with this industry's data-driven operational demands.", "El soporte de análisis interno se alinea con las demandas operativas basadas en datos de este sector.", "decision_speed");
+  if (["healthcare", "finance"].includes(ind)) add("CS-03", 3, "Compliance Review is essential before deploying AI in regulated workflows.", "La Revisión de Cumplimiento es esencial antes de desplegar IA en flujos regulados.", "compliance");
+
+  if (gapIds.has("customer_support_load")) add("CB-01", 4, "Directly resolves the customer support load gap through 24/7 automated deflection.", "Resuelve directamente la carga de soporte mediante deflección automatizada 24/7.", "support_deflection");
+  if (gapIds.has("scheduling_bottleneck")) add("AVA-01", 4, "AI Voice Assistant eliminates the scheduling bottleneck through end-to-end appointment automation.", "El Asistente de Voz IA elimina el cuello de botella de agendamiento con automatización de citas.", "time_saved");
+  if (gapIds.has("manual_data_entry")) { add("IS-03", 4, "Data Pipeline Build eliminates manual data entry through structured ingestion automation.", "El Pipeline de Datos elimina la entrada manual mediante automatización de ingesta estructurada.", "data_quality"); add("CA-01", 2, "Company Analyzer turns the cleaned data into actionable insights.", "El Analizador de Empresa convierte los datos limpios en información accionable.", "decision_speed"); }
+  if (gapIds.has("reporting_manual")) add("CA-01", 3, "Company Analyzer replaces manual reporting with real-time AI-driven insights.", "El Analizador de Empresa reemplaza reportes manuales con información en tiempo real.", "visibility");
+  if (gapIds.has("lead_follow_up")) add("CB-01", 3, "Chatbot automates lead capture and follow-up sequences, preventing revenue leakage.", "El chatbot automatiza captura y seguimiento de leads, previniendo fuga de ingresos.", "revenue_capture");
+  if (gapIds.has("billing_workflow")) add("IS-02", 2, "Integration Sprint connects billing workflows to automated payment systems.", "El Sprint de Integración conecta flujos de facturación a sistemas de pago automatizados.", "cash_flow");
+
+  if (budgetBand === "under_500") {
+    add("MS-01", 3, "Core Retainer delivers ongoing AI support within a constrained budget.", "El Retainer Básico provee soporte IA continuo dentro de un presupuesto ajustado.", "cost_control");
+    scores.delete("AVA-01"); scores.delete("IS-04"); scores.delete("IS-05"); scores.delete("MS-03");
+  } else if (budgetBand === "500_2k") {
+    add("IS-01", 3, "AI Onboarding Sprint is the right-sized first investment at this budget.", "El Sprint de Incorporación IA es la primera inversión adecuada para este presupuesto.", "speed_to_value");
+    add("MS-02", 2, "Growth Retainer sustains optimisation momentum after initial deployment.", "El Retainer de Crecimiento sostiene la optimización tras el despliegue inicial.", "sustained_growth");
+  } else if (budgetBand === "2k_5k") {
+    add("IS-02", 3, "Integration Sprint connects AI products to the existing stack for maximum leverage.", "El Sprint de Integración conecta los productos IA al stack existente para máximo aprovechamiento.", "tech_alignment");
+    add("MS-02", 3, "Growth Retainer provides the ongoing support needed at this scale.", "El Retainer de Crecimiento provee el soporte continuo necesario a esta escala.", "sustained_growth");
+  } else if (budgetBand === "5k_plus") {
+    add("MS-03", 4, "Enterprise Retainer delivers the SLA coverage appropriate for complex, high-value deployments.", "El Retainer Enterprise entrega la cobertura de SLA adecuada para despliegues complejos de alto valor.", "risk_management");
+    add("IS-05", 3, "Custom Agent Build unlocks bespoke automation beyond the standard catalogue.", "El Agente Personalizado desbloquea automatización a medida más allá del catálogo estándar.", "competitive_edge");
+  }
+
+  if (aiExpRaw === false || aiExpRaw === null) add("CS-01", 2, "AI Readiness Audit recommended as first step for businesses new to AI.", "Auditoría de Madurez IA recomendada como primer paso para negocios nuevos en IA.", "risk_reduction");
+  if (!scores.has("IS-01") && budgetBand !== "under_500") add("IS-01", 1, "AI Onboarding Sprint provides the fastest path from decision to live deployment.", "El Sprint de Incorporación IA provee la ruta más rápida de decisión a despliegue.", "speed_to_value");
+
+  const result = Array.from(scores.entries())
+    .sort((a, b) => b[1].score - a[1].score)
+    .slice(0, 5)
+    .map(([id, ps], idx) => {
+      const product = getProduct(id);
+      if (!product) return null;
+      return {
+        product_id: id,
+        product_name: product.name,
+        tier: (idx < 2 ? "primary" : "upsell") as "primary" | "upsell",
+        monthly_price_usd: product.monthly_price_usd,
+        one_time_price_usd: product.one_time_price_usd,
+        rationale: lang === "es" ? ps.es : ps.en,
+        value_driver: ps.driver,
+        priority_rank: idx + 1,
+      } satisfies RecommendedProduct;
+    })
+    .filter((p): p is RecommendedProduct => Boolean(p));
+
+  // Safety net: always return at least one product
+  if (result.length === 0) {
+    const fallback = getProduct("IS-01")!;
+    result.push({ product_id: "IS-01", product_name: fallback.name, tier: "primary", monthly_price_usd: fallback.monthly_price_usd, one_time_price_usd: fallback.one_time_price_usd, rationale: lang === "es" ? "Primer despliegue recomendado para cualquier perfil de negocio." : "Recommended first deployment for any business profile.", value_driver: "speed_to_value", priority_rank: 1 });
+  }
+  return result;
+}
+
+function buildRuleBasedRoadmap(products: RecommendedProduct[], readinessScore: number, language: Language): RoadmapPhase[] {
+  const primary = products.filter((p) => p.tier === "primary").map((p) => p.product_id);
+  const upsells = products.filter((p) => p.tier === "upsell").map((p) => p.product_id);
+  const phase1Products = readinessScore < 40 && primary.includes("CS-01") ? ["CS-01"] : primary.slice(0, 2).length > 0 ? primary.slice(0, 2) : [products[0]?.product_id ?? "IS-01"];
+  const phase2Products = (readinessScore < 40 ? primary.filter((p) => p !== "CS-01") : upsells.slice(0, 2));
+  const safePhase2 = phase2Products.length > 0 ? phase2Products : upsells.slice(0, 1).length > 0 ? upsells.slice(0, 1) : primary.slice(1).length > 0 ? primary.slice(1) : ["MS-01"];
+
+  if (language === "es") {
+    return [
+      { phase: 1, title: readinessScore < 40 ? "Fase 1 — Evaluación y Planificación" : "Fase 1 — Despliegue Inicial", duration_weeks: readinessScore < 40 ? 2 : 3, products: phase1Products, description: readinessScore < 40 ? "Auditoría de madurez IA, definición de hoja de ruta y priorización de implementaciones." : `Despliegue de las herramientas IA prioritarias: ${phase1Products.join(", ")}. Configuración, integración básica y pruebas de aceptación.`, cumulative_monthly_value_usd: 0 },
+      { phase: 2, title: "Fase 2 — Integración y Optimización", duration_weeks: 4, products: safePhase2, description: "Integración al stack tecnológico existente, optimización de flujos y medición de impacto operativo.", cumulative_monthly_value_usd: 0 },
+    ];
+  }
+  return [
+    { phase: 1, title: readinessScore < 40 ? "Phase 1 — Assessment & Planning" : "Phase 1 — Initial Deployment", duration_weeks: readinessScore < 40 ? 2 : 3, products: phase1Products, description: readinessScore < 40 ? "AI readiness audit, personalised roadmap definition, and implementation prioritisation." : `Deploy priority AI tools: ${phase1Products.join(", ")}. Configuration, basic integration, and acceptance testing.`, cumulative_monthly_value_usd: 0 },
+    { phase: 2, title: "Phase 2 — Integration & Optimisation", duration_weeks: 4, products: safePhase2, description: "Integrate with existing tech stack, optimise workflows, and measure operational impact.", cumulative_monthly_value_usd: 0 },
+  ];
+}
+
+function estimateRuleBasedValue(submission: CanonicalSubmissionJson, readinessScore: number): { value: number; reasoning: string } {
+  const lang = submission.language;
+  const team = (submission.business.team_size ?? "").toLowerCase();
+  const ind = (submission.business.industry ?? "").toLowerCase();
+
+  const base = team.includes("solo") || /^1\b/.test(team) ? 300 : team.includes("2-5") || team.includes("2 to 5") ? 600 : team.includes("6-20") ? 1400 : team.includes("21-50") ? 3000 : team.includes("50") ? 6000 : 500;
+  const indMult = ["finance", "healthcare", "professional"].includes(ind) ? 1.5 : ["retail", "hospitality", "logistics"].includes(ind) ? 1.3 : 1.0;
+  const readinessMult = readinessScore >= 60 ? 1.0 : readinessScore >= 40 ? 0.8 : 0.6;
+  const value = Math.round((base * indMult * readinessMult) / 100) * 100;
+
+  const reasoning = lang === "es"
+    ? `Estimación conservadora: base $${base}/mes para ${team || "equipo pequeño"} × coeficiente de sector ${indMult}x (${ind || "general"}) × factor de madurez ${readinessMult}x (${readinessScore}/100). Supone ganancia de eficiencia del 15–25% en 2–3 procesos clave.`
+    : `Conservative estimate: base $${base}/mo for ${team || "small team"} × industry coefficient ${indMult}x (${ind || "general"}) × readiness factor ${readinessMult}x (${readinessScore}/100). Assumes 15–25% efficiency gain across 2–3 core workflows.`;
+
+  return { value, reasoning };
+}
+
+function generateRuleBasedReport(submission: CanonicalSubmissionJson): FullReport {
+  const language = submission.language;
+  const readiness = scoreReadiness(submission);
+  const budgetBand = normalizeBudget(submission.budget.budget_comfort);
+  const dataSource: "full" | "intake_only" = submission.website_scrape?.scrape_status === "success" ? "full" : "intake_only";
+  const profile = toSafeProfile(submission);
+
+  const gaps = detectRuleBasedGaps(submission);
+  const products = scoreRuleBasedProducts(submission, gaps, readiness.total, budgetBand);
+  const roadmap = buildRuleBasedRoadmap(products, readiness.total, language);
+  const { value: estimatedValue, reasoning: valueReasoning } = estimateRuleBasedValue(submission, readiness.total);
+  const confidence = Math.max(45, computeConfidence({ questionsAnswered: profile.questions_answered, dataSource, readinessScore: readiness.total }) - 10);
+
+  const diagnosis: DiagnosisOutput = {
+    business_summary: buildRuleBasedSummary(submission),
+    operational_gaps: gaps,
+    pain_priority_rank: gaps.map((g) => g.gap_id),
+    automation_readiness_score: readiness.total,
+    readiness_dimension_breakdown: readiness.dims,
+    recommended_products: products,
+    implementation_roadmap: roadmap,
+    estimated_monthly_value_usd: estimatedValue,
+    value_reasoning: valueReasoning,
+    confidence_score: confidence,
+    data_source: dataSource,
+    reasoning_trace: "in-house-rule-based-v1",
+    human_escalation_flag: readiness.total < 40 || confidence < 55,
+    language,
+    llm_provider: "in-house",
+    llm_model: "rule-based-v1",
+    generated_at: new Date().toISOString(),
+  };
+
+  const roi = computeRoi({ products, estimatedMonthlyValueUsd: estimatedValue, language });
+  const beforeAfter = buildBeforeAfter({ language, gaps, roadmap, valueReasoning });
+  const demos = buildDefaultDemos(language);
+  return { catalogue_version: PRODUCT_CATALOGUE_VERSION, diagnosis, before_after: beforeAfter, roi, demos };
+}
+
 function fallbackReport(
+  submission: CanonicalSubmissionJson,
+  _meta?: { llm_provider?: string; llm_model?: string; reason?: string | null }
+): FullReport {
+  return generateRuleBasedReport(submission);
+}
+
+function _fallbackReport_unused(
   submission: CanonicalSubmissionJson,
   meta?: { llm_provider?: string; llm_model?: string; reason?: string | null }
 ): FullReport {
@@ -753,6 +1009,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
     }
     lastProvider = pass1.llm_provider;
     lastModel = pass1.llm_model;
+    await new Promise((r) => setTimeout(r, 2000));
 
     const pass2 = await callPassJson({
       language,
@@ -768,6 +1025,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
     }
     lastProvider = pass2.llm_provider;
     lastModel = pass2.llm_model;
+    await new Promise((r) => setTimeout(r, 2000));
 
     const pass3 = await callPassJson({
       language,
@@ -783,6 +1041,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
     }
     lastProvider = pass3.llm_provider;
     lastModel = pass3.llm_model;
+    await new Promise((r) => setTimeout(r, 2000));
 
     const catalogueLite = PRODUCT_CATALOGUE.map((p) => ({
       id: p.id,
@@ -884,5 +1143,5 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
     };
   }
 
-  return fallbackReport(submission, { llm_provider: lastProvider, llm_model: lastModel, reason: lastError });
+  return generateRuleBasedReport(submission);
 }

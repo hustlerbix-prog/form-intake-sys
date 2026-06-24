@@ -2,8 +2,23 @@ import { createHash, createCipheriv, createDecipheriv, randomBytes } from "crypt
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { z } from "zod";
 
-export const AiProviderSchema = z.enum(["anthropic", "openrouter"]);
+export const AiProviderSchema = z.enum([
+  "anthropic",
+  "openrouter",
+  "openai",
+  "gemini",
+  "deepseek",
+  "moonshot",
+]);
 export type AiProvider = z.infer<typeof AiProviderSchema>;
+
+export const ProviderPoolEntrySchema = z.object({
+  provider: AiProviderSchema,
+  model: z.string().min(1),
+  baseUrl: z.string().url().optional().nullable(),
+  apiKey: z.string().optional().nullable(),
+});
+export type ProviderPoolEntry = z.infer<typeof ProviderPoolEntrySchema>;
 
 export const AiSettingsSchema = z.object({
   enabled: z.boolean().default(true),
@@ -14,6 +29,8 @@ export const AiSettingsSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.2),
   timeoutMs: z.number().int().min(1000).max(120000).default(60000),
   apiKey: z.string().optional().nullable(),
+  poolStrategy: z.enum(["off", "cascade", "race"]).default("off"),
+  providerPool: z.array(ProviderPoolEntrySchema).max(8).default([]),
 });
 
 export type AiSettings = z.infer<typeof AiSettingsSchema>;
@@ -30,6 +47,8 @@ const DEFAULTS: Stored = {
     temperature: 0.2,
     timeoutMs: 60000,
     apiKey: null,
+    poolStrategy: "off",
+    providerPool: [],
   }),
 };
 
@@ -125,4 +144,3 @@ export function maskApiKey(apiKey: string | null | undefined): string | null {
   const tail = apiKey.slice(-6);
   return `•••••${tail}`;
 }
-
