@@ -776,100 +776,6 @@ function generateRuleBasedReport(submission: CanonicalSubmissionJson): FullRepor
   return { catalogue_version: PRODUCT_CATALOGUE_VERSION, diagnosis, before_after: beforeAfter, roi, demos };
 }
 
-function fallbackReport(
-  submission: CanonicalSubmissionJson,
-  _meta?: { llm_provider?: string; llm_model?: string; reason?: string | null }
-): FullReport {
-  return generateRuleBasedReport(submission);
-}
-
-function _fallbackReport_unused(
-  submission: CanonicalSubmissionJson,
-  meta?: { llm_provider?: string; llm_model?: string; reason?: string | null }
-): FullReport {
-  const profile = toSafeProfile(submission);
-  const dataSource: "full" | "intake_only" =
-    submission.website_scrape && submission.website_scrape.scrape_status === "success" ? "full" : "intake_only";
-  const readiness = scoreReadiness(submission);
-  const confidence = computeConfidence({ questionsAnswered: profile.questions_answered, dataSource, readinessScore: readiness.total });
-  const demos = buildDefaultDemos(submission.language);
-  const llmProvider = meta?.llm_provider ?? "disabled";
-  const llmModel = meta?.llm_model ?? "disabled";
-  const reason = meta?.reason ? String(meta.reason).slice(0, 140) : null;
-  const isConfigMissing = llmProvider === "disabled" || llmModel === "disabled";
-  const productsBase = fallbackRecommendations(submission, readiness.total);
-  const products = isConfigMissing
-    ? productsBase
-    : productsBase.map((p) => ({
-        ...p,
-        rationale:
-          submission.language === "es"
-            ? "Recomendación por defecto (IA no disponible temporalmente)."
-            : "Default recommendation (AI temporarily unavailable).",
-      }));
-  const roi = computeRoi({ products, estimatedMonthlyValueUsd: 0, language: submission.language });
-  const diagnosis: DiagnosisOutput = {
-    business_summary:
-      submission.language === "es"
-        ? isConfigMissing
-          ? "Resumen generado sin IA (modelo no configurado). Conecta un modelo en /admin/settings para un diagnóstico completo."
-          : `Diagnóstico IA no disponible temporalmente. Motivo: ${reason ?? "error desconocido"}. Puedes rehacer el análisis.`
-        : isConfigMissing
-          ? "Summary generated without AI (model not configured). Connect a model in /admin/settings for a full diagnosis."
-          : `AI diagnosis temporarily unavailable. Reason: ${reason ?? "unknown error"}. You can redo the analysis.`,
-    operational_gaps: fallbackGaps(submission),
-    pain_priority_rank: fallbackGaps(submission).map((g) => g.gap_id),
-    automation_readiness_score: readiness.total,
-    readiness_dimension_breakdown: readiness.dims,
-    recommended_products: products,
-    implementation_roadmap: [
-      {
-        phase: 1,
-        title: submission.language === "es" ? "Fase 1 — Fundaciones" : "Phase 1 — Foundations",
-        duration_weeks: 2,
-        products: products.slice(0, 2).map((p) => p.product_id),
-        description:
-          submission.language === "es"
-            ? "Definir alcance, conectar datos básicos y desplegar una primera automatización."
-            : "Define scope, connect basic data, and deploy a first automation.",
-        cumulative_monthly_value_usd: 0,
-      },
-      {
-        phase: 2,
-        title: submission.language === "es" ? "Fase 2 — Optimización" : "Phase 2 — Optimisation",
-        duration_weeks: 3,
-        products: products.slice(2).map((p) => p.product_id),
-        description: submission.language === "es" ? "Ampliar cobertura y medir desempeño." : "Expand coverage and track performance.",
-        cumulative_monthly_value_usd: 0,
-      },
-    ],
-    estimated_monthly_value_usd: 0,
-    value_reasoning:
-      submission.language === "es"
-        ? isConfigMissing
-          ? "Valor estimado pendiente de IA. Conecta un modelo para generar cálculos basados en señales del negocio."
-          : "Valor estimado pendiente de IA. Reintenta el análisis para generar cálculos basados en señales del negocio."
-        : isConfigMissing
-          ? "Estimated value pending AI. Connect a model to generate calculations from business signals."
-          : "Estimated value pending AI. Rerun analysis to generate calculations from business signals.",
-    confidence_score: confidence,
-    data_source: dataSource,
-    reasoning_trace: "fallback_mode",
-    human_escalation_flag: readiness.total < 40 || confidence < 60,
-    language: submission.language,
-    llm_provider: llmProvider,
-    llm_model: llmModel,
-    generated_at: new Date().toISOString(),
-  };
-  const beforeAfter = buildBeforeAfter({ language: submission.language, gaps: diagnosis.operational_gaps, roadmap: diagnosis.implementation_roadmap, valueReasoning: diagnosis.value_reasoning });
-  return {
-    catalogue_version: PRODUCT_CATALOGUE_VERSION,
-    diagnosis,
-    before_after: beforeAfter,
-    roi,
-    demos,
-  };
-}
 
 function normalizeBudget(budget: string | null): "under_500" | "500_2k" | "2k_5k" | "5k_plus" | "unknown" {
   const b = (budget ?? "").toLowerCase();
@@ -915,71 +821,6 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
-function fallbackGaps(submission: CanonicalSubmissionJson): OperationalGap[] {
-  const gaps: OperationalGap[] = [];
-  if (submission.pain_points.top_time_cost) {
-    gaps.push({
-      gap_id: "time_heavy_manual_work",
-      description: submission.pain_points.top_time_cost,
-      severity_score: 8,
-      evidence_source: "form",
-    });
-  }
-  if (submission.pain_points.bottleneck) {
-    gaps.push({
-      gap_id: "process_bottleneck",
-      description: submission.pain_points.bottleneck,
-      severity_score: 7,
-      evidence_source: "form",
-    });
-  }
-  if (gaps.length === 0) {
-    gaps.push({
-      gap_id: "low_operational_visibility",
-      description:
-        submission.language === "es"
-          ? "Falta de visibilidad operativa y seguimiento consistente en procesos clave."
-          : "Lack of operational visibility and consistent tracking across key processes.",
-      severity_score: 6,
-      evidence_source: "inferred",
-    });
-  }
-  return gaps.slice(0, 3);
-}
-
-function fallbackRecommendations(submission: CanonicalSubmissionJson, readinessScore: number): RecommendedProduct[] {
-  const budgetBand = normalizeBudget(submission.budget.budget_comfort);
-  const picks: string[] =
-    readinessScore < 40
-      ? ["CS-01", "IS-01"]
-      : budgetBand === "under_500"
-        ? ["CB-01", "IS-01", "MS-01"]
-        : budgetBand === "500_2k"
-          ? ["AVA-01", "IS-01", "MS-02"]
-          : budgetBand === "5k_plus"
-            ? ["CB-01", "CA-01", "AVA-01", "MS-03"]
-            : ["CA-01", "IS-02", "MS-02"];
-
-  return picks
-    .map((id, idx) => {
-      const p = getProduct(id);
-      if (!p) return null;
-      return {
-        product_id: p.id,
-        product_name: p.name,
-        tier: idx < 2 ? "primary" : "upsell",
-        monthly_price_usd: p.monthly_price_usd,
-        one_time_price_usd: p.one_time_price_usd,
-        rationale:
-          submission.language === "es"
-            ? "Recomendación por defecto (IA no configurada)."
-            : "Default recommendation (AI not configured).",
-        value_driver: "time_saved",
-        priority_rank: idx + 1,
-      } satisfies RecommendedProduct;
-    })
-    .filter((v): v is RecommendedProduct => Boolean(v));
-}
 
 export async function generateFullReport(submission: CanonicalSubmissionJson): Promise<FullReport> {
   const safeProfile = toSafeProfile(submission);
@@ -990,9 +831,6 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
   const language = submission.language;
 
   const totalRetries = 2;
-  let lastError: string | null = null;
-  let lastProvider: string = "disabled";
-  let lastModel: string = "disabled";
 
   for (let attempt = 0; attempt <= totalRetries; attempt++) {
     const pass1 = await callPassJson({
@@ -1001,14 +839,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
       user: `BUSINESS PROFILE (intake form):\n${JSON.stringify(safeProfile, null, 2)}\n\nWEBSITE DATA (from scraper):\n${safeScrape ? JSON.stringify(safeScrape, null, 2) : "NOT AVAILABLE — website was not scraped or scrape failed."}`,
       schema: Pass1Schema,
     });
-    if (!pass1.ok) {
-      lastProvider = pass1.llm_provider;
-      lastModel = pass1.llm_model;
-      lastError = `pass1:${pass1.error}${pass1.llm_error ? `:${pass1.llm_error}` : ""}`;
-      continue;
-    }
-    lastProvider = pass1.llm_provider;
-    lastModel = pass1.llm_model;
+    if (!pass1.ok) { continue; }
     await new Promise((r) => setTimeout(r, 2000));
 
     const pass2 = await callPassJson({
@@ -1017,14 +848,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
       user: `BUSINESS CONTEXT SUMMARY (Pass 1):\n${pass1.data.business_summary}\n\nBUSINESS PROFILE:\n${JSON.stringify(safeProfile, null, 2)}\n\nWEBSITE DATA:\n${safeScrape ? JSON.stringify(safeScrape, null, 2) : "NOT AVAILABLE"}`,
       schema: Pass2Schema,
     });
-    if (!pass2.ok) {
-      lastProvider = pass2.llm_provider;
-      lastModel = pass2.llm_model;
-      lastError = `pass2:${pass2.error}${pass2.llm_error ? `:${pass2.llm_error}` : ""}`;
-      continue;
-    }
-    lastProvider = pass2.llm_provider;
-    lastModel = pass2.llm_model;
+    if (!pass2.ok) { continue; }
     await new Promise((r) => setTimeout(r, 2000));
 
     const pass3 = await callPassJson({
@@ -1033,14 +857,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
       user: `BUSINESS CONTEXT:\n${pass1.data.business_summary}\n\nTOP GAPS:\n${JSON.stringify(pass2.data.operational_gaps, null, 2)}\n\nBUSINESS PROFILE:\n${JSON.stringify(safeProfile, null, 2)}\n\nWEBSITE DATA:\n${safeScrape ? JSON.stringify(safeScrape, null, 2) : "NOT AVAILABLE"}`,
       schema: Pass3Schema,
     });
-    if (!pass3.ok) {
-      lastProvider = pass3.llm_provider;
-      lastModel = pass3.llm_model;
-      lastError = `pass3:${pass3.error}${pass3.llm_error ? `:${pass3.llm_error}` : ""}`;
-      continue;
-    }
-    lastProvider = pass3.llm_provider;
-    lastModel = pass3.llm_model;
+    if (!pass3.ok) { continue; }
     await new Promise((r) => setTimeout(r, 2000));
 
     const catalogueLite = PRODUCT_CATALOGUE.map((p) => ({
@@ -1057,20 +874,10 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
       user: `BUSINESS CONTEXT:\n${pass1.data.business_summary}\n\nTOP GAPS (ranked):\n${JSON.stringify(pass2.data.operational_gaps, null, 2)}\nPAIN PRIORITY RANK:\n${JSON.stringify(pass2.data.pain_priority_rank)}\n\nREADINESS SCORE: ${pass3.data.automation_readiness_score}/100\nREADINESS BREAKDOWN:\n${JSON.stringify(pass3.data.readiness_dimension_breakdown, null, 2)}\n\nBUSINESS PROFILE:\n${JSON.stringify(safeProfile, null, 2)}\n\nWEBSITE DATA:\n${safeScrape ? JSON.stringify(safeScrape, null, 2) : "NOT AVAILABLE"}\n\nPRODUCT CATALOGUE (only use IDs from this list):\n${JSON.stringify(catalogueLite, null, 2)}`,
       schema: Pass4Schema,
     });
-    if (!pass4.ok) {
-      lastProvider = pass4.llm_provider;
-      lastModel = pass4.llm_model;
-      lastError = `pass4:${pass4.error}${pass4.llm_error ? `:${pass4.llm_error}` : ""}`;
-      continue;
-    }
-    lastProvider = pass4.llm_provider;
-    lastModel = pass4.llm_model;
+    if (!pass4.ok) { continue; }
 
     const hallucinated = validateProductIds(pass4.data.recommended_products.map((p) => p.product_id));
-    if (hallucinated.length > 0) {
-      lastError = `hallucinated_products:${hallucinated.join(",")}`;
-      continue;
-    }
+    if (hallucinated.length > 0) { continue; }
 
     const dimSum =
       pass3.data.readiness_dimension_breakdown.data_availability +
@@ -1078,10 +885,7 @@ export async function generateFullReport(submission: CanonicalSubmissionJson): P
       pass3.data.readiness_dimension_breakdown.budget_comfort +
       pass3.data.readiness_dimension_breakdown.decision_authority +
       pass3.data.readiness_dimension_breakdown.urgency;
-    if (Math.abs(dimSum - pass3.data.automation_readiness_score) > 5) {
-      lastError = `readiness_sum_mismatch:${dimSum}:${pass3.data.automation_readiness_score}`;
-      continue;
-    }
+    if (Math.abs(dimSum - pass3.data.automation_readiness_score) > 5) { continue; }
 
     const questionsAnswered = safeProfile.questions_answered;
     const confidenceScore = computeConfidence({
