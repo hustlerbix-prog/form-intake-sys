@@ -364,7 +364,12 @@ export async function scrapeWebsite(input: {
       }
     }
 
-    const corpus = deduplicateCorpus(corpusPages, Number(process.env.SCRAPER_TOKEN_BUDGET_TOTAL ?? 20000));
+    // ScrapeGraph returns clean markdown — preserve structure instead of sentence-deduplicating
+    // (deduplicateCorpus drops lines < 40 chars, destroying phone numbers, names, addresses)
+    const charBudget = Number(process.env.SCRAPER_TOKEN_BUDGET_TOTAL ?? 20000) * 4;
+    const corpus = (scraperProvider === "scrapegraph" && rootMarkdown)
+      ? concatenateMarkdownPages(corpusPages, charBudget)
+      : deduplicateCorpus(corpusPages, Number(process.env.SCRAPER_TOKEN_BUDGET_TOTAL ?? 20000));
 
     // ── Pre-extract contact info via regex from all raw HTML (before stripping) ─
     const allPagesHtml = [bestHtml];
@@ -671,8 +676,19 @@ async function fetchWithScrapeGraph(
     }
 
     const data = (await res.json()) as Record<string, unknown>;
-    const html = typeof data.html === "string" ? data.html : null;
-    const markdown = typeof data.markdown === "string" ? data.markdown : null;
+
+    // API v2 shape: { status, data: { results: { html?, markdown? }, metadata }, elapsed_ms }
+    // Also handle flat shape { html?, markdown? } for forward-compat
+    const inner = (data.data as Record<string, unknown> | undefined) ?? data;
+    const results = (inner.results as Record<string, unknown> | undefined) ?? inner;
+
+    if (data.status === "error") {
+      const errMsg = typeof data.error === "string" ? data.error : "ScrapeGraph API error";
+      return { status: "error", html: null, markdown: null, finalUrl: url, statusCode: res.status, responseHeaders: {}, error: errMsg };
+    }
+
+    const html = typeof results.html === "string" ? results.html : null;
+    const markdown = typeof results.markdown === "string" ? results.markdown : null;
 
     if (!html && !markdown) {
       return {
@@ -682,7 +698,7 @@ async function fetchWithScrapeGraph(
         finalUrl: url,
         statusCode: res.status,
         responseHeaders: {},
-        error: "ScrapeGraph returned empty content",
+        error: `ScrapeGraph returned empty content. Response keys: ${Object.keys(data).join(",")}`,
       };
     }
 
@@ -1202,6 +1218,19 @@ function extractCleanText(html: string): string {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// For markdown from ScrapeGraph — preserve all lines including short ones (phone numbers, names)
+function concatenateMarkdownPages(pages: string[], charBudget: number): string {
+  const parts: string[] = [];
+  let total = 0;
+  for (const page of pages) {
+    if (total >= charBudget) break;
+    const chunk = page.slice(0, charBudget - total);
+    parts.push(chunk);
+    total += chunk.length;
+  }
+  return parts.join("\n\n---\n\n");
 }
 
 function deduplicateCorpus(pages: string[], tokenBudget: number): string {
