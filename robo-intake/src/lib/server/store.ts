@@ -455,6 +455,7 @@ async function startWebsiteScrape(profileId: string, websiteUrl: string, options
         social_links: {},
         content_excerpt: null,
         content_summary: null,
+        content_corpus: null,
         ai_summary: null,
         ai_services_detected: [],
         ai_industry: null,

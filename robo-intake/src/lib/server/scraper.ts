@@ -114,6 +114,7 @@ export type ScrapeResult = {
   // Raw content
   content_excerpt: string | null;
   content_summary: string | null;
+  content_corpus: string | null;         // full deduplicated cleaned text — knowledge base for agents
   // AI enrichment — legacy fields kept for backward compat
   ai_summary: string | null;
   ai_services_detected: string[];
@@ -405,6 +406,7 @@ export async function scrapeWebsite(input: {
       social_links: socialLinks,
       content_excerpt: contentExcerpt,
       content_summary: contentSummary,
+      content_corpus: corpus.slice(0, 60000) || null,
       ai_summary: null,
       ai_services_detected: [],
       ai_industry: null,
@@ -1340,6 +1342,7 @@ function emptyResult(
     social_links: {},
     content_excerpt: null,
     content_summary: null,
+    content_corpus: null,
     ai_summary: null,
     ai_services_detected: [],
     ai_industry: null,

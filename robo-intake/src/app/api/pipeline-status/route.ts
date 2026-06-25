@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     pdf_ready: Boolean(status?.pdf_ready && pdf),
     pdf_url: status?.pdf_ready && pdf ? `/api/download/pdf?profile_id=${profileId}` : null,
     json_url: submission ? `/api/download/json?profile_id=${profileId}` : null,
+    scrape_url: status?.scraped && submission?.website_scrape ? `/api/download/scrape?profile_id=${profileId}` : null,
     report: submission?.full_report
       ? {
           catalogue_version: submission.full_report.catalogue_version,

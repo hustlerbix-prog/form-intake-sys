@@ -49,6 +49,7 @@ describe("generateIntakePdf", () => {
           social_links: {},
           content_excerpt: "Example excerpt",
           content_summary: "Example summary",
+          content_corpus: null,
           ai_summary: "AI summary",
           ai_services_detected: ["Service A"],
           ai_industry: "other",
