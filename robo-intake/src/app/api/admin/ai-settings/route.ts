@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { assertAdminAccess } from "@/lib/server/adminAuth";
-import { AiSettingsSchema, loadAdminSettings, maskApiKey, saveAdminSettings, type ProviderPoolEntry } from "@/lib/server/adminSettings";
+import { AiSettingsSchema, ScraperSettingsSchema, loadAdminSettings, maskApiKey, saveAdminSettings, type ProviderPoolEntry } from "@/lib/server/adminSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,10 @@ export async function GET(req: NextRequest) {
         ...e,
         apiKey: e.apiKey ? maskApiKey(e.apiKey) : null,
       })),
+    },
+    scraper: {
+      ...stored.scraper,
+      sgaiApiKey: stored.scraper.sgaiApiKey ? maskApiKey(stored.scraper.sgaiApiKey) : null,
     },
   });
 }
@@ -55,12 +59,24 @@ export async function PUT(req: NextRequest) {
     providerPool: resolvedPool,
   };
 
-  const saved = await saveAdminSettings({ ai });
+  // Scraper settings — restore masked sgaiApiKey if present
+  const incomingScraper = ScraperSettingsSchema.parse(body?.scraper ?? current.stored.scraper);
+  const keepSgaiKey = typeof body?.scraper?.sgaiApiKey === "string" && body.scraper.sgaiApiKey.includes("•");
+  const scraper = {
+    ...incomingScraper,
+    sgaiApiKey: keepSgaiKey ? current.stored.scraper.sgaiApiKey ?? null : incomingScraper.sgaiApiKey ?? null,
+  };
+
+  const saved = await saveAdminSettings({ ai, scraper });
   return NextResponse.json({
     persisted: saved.persisted,
     ai: {
       ...saved.stored.ai,
       apiKey: saved.stored.ai.apiKey ? maskApiKey(saved.stored.ai.apiKey) : null,
+    },
+    scraper: {
+      ...saved.stored.scraper,
+      sgaiApiKey: saved.stored.scraper.sgaiApiKey ? maskApiKey(saved.stored.scraper.sgaiApiKey) : null,
     },
   });
 }

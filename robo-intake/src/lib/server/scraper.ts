@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { appendJsonlLog } from "./logging";
 import { callConfiguredLlm } from "./llmClient";
+import { loadAdminSettings } from "./adminSettings";
 import { persistScrapeResult } from "./supabaseClient";
 import { z } from "zod";
 
@@ -244,6 +245,12 @@ export async function scrapeWebsite(input: {
     fields: { profile_id: input.profile_id, website_url: url },
   });
 
+  // Load scraper provider setting
+  const { stored: adminStored } = await loadAdminSettings();
+  const scraperProvider = adminStored.scraper.provider;
+  const sgaiApiKey = adminStored.scraper.sgaiApiKey ?? process.env.SGAI_API_KEY ?? null;
+  const sgaiTimeoutMs = adminStored.scraper.sgaiTimeoutMs;
+
   const timeoutMs = Number(process.env.SCRAPE_TIMEOUT_MS ?? 25000);
   const maxChars = Number(process.env.MAX_HTML_CHARS ?? 80000);
   const useHeadless = process.env.SCRAPER_USE_HEADLESS === "true";
@@ -253,43 +260,69 @@ export async function scrapeWebsite(input: {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    // ── Pass 1: Static fetch of root URL ────────────────────────────────────
-    const rootPage = await fetchStatic(url, controller.signal);
+    // ── Root page fetch ──────────────────────────────────────────────────────
+    let rootHtml = "";
+    let rootMarkdown: string | null = null;
+    let rootFinalUrl: string | null = null;
+    let rootStatusCode: number | null = null;
+    let rootHeaders: Record<string, string> = {};
 
-    if (rootPage.status === "error") {
-      const status: ScrapeStatus =
-        rootPage.error?.toLowerCase().includes("abort") ? "timeout" :
-        rootPage.error?.toLowerCase().includes("403") || rootPage.error?.toLowerCase().includes("429") ? "blocked" :
-        "failed";
-
-      const result = emptyResult(input.profile_id, url, status, rootPage.error ?? "Fetch failed");
-      await logDone(input.profile_id, url, startedAt, result);
-      return result;
-    }
-
-    // Detect bot-blocking on root — try Zyte fallback before giving up
-    if (looksBlocked(rootPage.html ?? "", rootPage.statusCode ?? 200)) {
-      await appendJsonlLog({ file: "scraper.log", event: "scrape_blocked_zyte_fallback", fields: { profile_id: input.profile_id, url } });
-      const zyteResult = await fetchWithZyte(url, controller.signal);
-      if (zyteResult.status !== "ok" || !zyteResult.html) {
-        const result = emptyResult(input.profile_id, url, "blocked", "Bot-block or CAPTCHA detected; Zyte fallback also failed");
-        result.final_url = rootPage.finalUrl;
-        result.status_code = rootPage.statusCode;
+    if (scraperProvider === "scrapegraph" && sgaiApiKey) {
+      await appendJsonlLog({ file: "scraper.log", event: "scrape_sgai_start", fields: { profile_id: input.profile_id, url } });
+      const sgResult = await fetchWithScrapeGraph(url, sgaiApiKey, sgaiTimeoutMs, controller.signal);
+      if (sgResult.status === "error") {
+        const status: ScrapeStatus =
+          sgResult.error?.toLowerCase().includes("abort") ? "timeout" :
+          sgResult.error?.toLowerCase().includes("block") || sgResult.error?.toLowerCase().includes("403") ? "blocked" :
+          "failed";
+        const result = emptyResult(input.profile_id, url, status, sgResult.error ?? "ScrapeGraph fetch failed");
         await logDone(input.profile_id, url, startedAt, result);
         return result;
       }
-      // Zyte succeeded — swap in its HTML as the root page
-      rootPage.html = zyteResult.html;
-      rootPage.finalUrl = zyteResult.finalUrl ?? rootPage.finalUrl;
-      rootPage.statusCode = zyteResult.statusCode ?? rootPage.statusCode;
+      rootHtml = (sgResult.html ?? "").slice(0, maxChars);
+      rootMarkdown = sgResult.markdown ?? null;
+      rootFinalUrl = sgResult.finalUrl;
+      rootStatusCode = sgResult.statusCode;
+      rootHeaders = sgResult.responseHeaders;
+    } else {
+      // ── Playwright path: static fetch + optional Zyte fallback ──────────
+      const rootPage = await fetchStatic(url, controller.signal);
+
+      if (rootPage.status === "error") {
+        const status: ScrapeStatus =
+          rootPage.error?.toLowerCase().includes("abort") ? "timeout" :
+          rootPage.error?.toLowerCase().includes("403") || rootPage.error?.toLowerCase().includes("429") ? "blocked" :
+          "failed";
+        const result = emptyResult(input.profile_id, url, status, rootPage.error ?? "Fetch failed");
+        await logDone(input.profile_id, url, startedAt, result);
+        return result;
+      }
+
+      // Detect bot-blocking on root — try Zyte fallback before giving up
+      if (looksBlocked(rootPage.html ?? "", rootPage.statusCode ?? 200)) {
+        await appendJsonlLog({ file: "scraper.log", event: "scrape_blocked_zyte_fallback", fields: { profile_id: input.profile_id, url } });
+        const zyteResult = await fetchWithZyte(url, controller.signal);
+        if (zyteResult.status !== "ok" || !zyteResult.html) {
+          const result = emptyResult(input.profile_id, url, "blocked", "Bot-block or CAPTCHA detected; Zyte fallback also failed");
+          result.final_url = rootPage.finalUrl;
+          result.status_code = rootPage.statusCode;
+          await logDone(input.profile_id, url, startedAt, result);
+          return result;
+        }
+        rootPage.html = zyteResult.html;
+        rootPage.finalUrl = zyteResult.finalUrl ?? rootPage.finalUrl;
+        rootPage.statusCode = zyteResult.statusCode ?? rootPage.statusCode;
+      }
+
+      rootHtml = (rootPage.html ?? "").slice(0, maxChars);
+      rootFinalUrl = rootPage.finalUrl;
+      rootStatusCode = rootPage.statusCode;
+      rootHeaders = rootPage.responseHeaders ?? {};
     }
 
-    const rootHtml = (rootPage.html ?? "").slice(0, maxChars);
-
-    // ── Pass 2: Headless render via agent-browser if content is insufficient ──
-    // AC-04: trigger if clean text < 500 chars OR main/article/section < 3 text children
+    // ── Pass 2: Headless render (Playwright path only) ───────────────────────
     let bestHtml = rootHtml;
-    if (useHeadless && !passesContentThreshold(rootHtml)) {
+    if (scraperProvider !== "scrapegraph" && useHeadless && !passesContentThreshold(rootHtml)) {
       await appendJsonlLog({ file: "scraper.log", event: "scrape_pass2_triggered", fields: { profile_id: input.profile_id, url } });
       const headless = await fetchWithAgentBrowser(url);
       if (headless.cleanText && headless.cleanText.length > extractCleanText(rootHtml).length) {
@@ -302,7 +335,9 @@ export async function scrapeWebsite(input: {
 
     // ── Multi-page crawl: priority slugs ────────────────────────────────────
     const rootDomain = extractDomain(url);
-    const corpusPages: string[] = [extractCleanText(bestHtml)];
+    // For ScrapeGraph: use markdown as clean text if available; otherwise extract from HTML
+    const rootText = rootMarkdown ?? extractCleanText(bestHtml);
+    const corpusPages: string[] = [rootText];
     let pagesScraped = 1;
 
     const internalLinks = extractInternalLinks(bestHtml, url);
@@ -310,12 +345,17 @@ export async function scrapeWebsite(input: {
 
     for (const pageUrl of priorityUrls.slice(0, maxPages - 1)) {
       try {
-        const page = await fetchStatic(pageUrl, controller.signal);
-        if (page.status === "ok" && page.html && !looksBlocked(page.html, page.statusCode ?? 200)) {
-          const text = extractCleanText(page.html.slice(0, 30000));
-          if (text.length > 200) {
-            corpusPages.push(text);
-            pagesScraped++;
+        if (scraperProvider === "scrapegraph" && sgaiApiKey) {
+          const sgPage = await fetchWithScrapeGraph(pageUrl, sgaiApiKey, sgaiTimeoutMs, controller.signal);
+          if (sgPage.status === "ok") {
+            const text = sgPage.markdown ?? extractCleanText((sgPage.html ?? "").slice(0, 30000));
+            if (text.length > 200) { corpusPages.push(text); pagesScraped++; }
+          }
+        } else {
+          const page = await fetchStatic(pageUrl, controller.signal);
+          if (page.status === "ok" && page.html && !looksBlocked(page.html, page.statusCode ?? 200)) {
+            const text = extractCleanText(page.html.slice(0, 30000));
+            if (text.length > 200) { corpusPages.push(text); pagesScraped++; }
           }
         }
       } catch {
@@ -326,13 +366,14 @@ export async function scrapeWebsite(input: {
     const corpus = deduplicateCorpus(corpusPages, Number(process.env.SCRAPER_TOKEN_BUDGET_TOTAL ?? 20000));
 
     // ── Pre-extract contact info via regex from all raw HTML (before stripping) ─
-    // Contact info lives in headers/footers which extractCleanText strips out
     const allPagesHtml = [bestHtml];
-    for (const pageUrl of priorityUrls.slice(0, maxPages - 1)) {
-      try {
-        const page = await fetchStatic(pageUrl, controller.signal);
-        if (page.status === "ok" && page.html) allPagesHtml.push(page.html.slice(0, 30000));
-      } catch { /* skip */ }
+    if (scraperProvider !== "scrapegraph") {
+      for (const pageUrl of priorityUrls.slice(0, maxPages - 1)) {
+        try {
+          const page = await fetchStatic(pageUrl, controller.signal);
+          if (page.status === "ok" && page.html) allPagesHtml.push(page.html.slice(0, 30000));
+        } catch { /* skip */ }
+      }
     }
     const regexContactInfo: ContactInfo = allPagesHtml.reduce<ContactInfo>((acc, html) => {
       const extracted = preExtractContactInfo(html);
@@ -340,7 +381,7 @@ export async function scrapeWebsite(input: {
     }, { phone: [], email: [], whatsapp: null, address: null, hours: null });
 
     // ── Build structured result ──────────────────────────────────────────────
-    const techProfile = buildTechProfile(bestHtml, rootPage.responseHeaders ?? {});
+    const techProfile = buildTechProfile(bestHtml, rootHeaders);
     const socialLinks = extractSocialLinks(bestHtml);
     const pageTitle = extractTitle(bestHtml);
     const metaDescription = extractMetaDescription(bestHtml);
@@ -353,8 +394,8 @@ export async function scrapeWebsite(input: {
       website_url: url,
       scraped_at: new Date().toISOString(),
       scrape_status: "success",
-      final_url: rootPage.finalUrl,
-      status_code: rootPage.statusCode,
+      final_url: rootFinalUrl,
+      status_code: rootStatusCode,
       page_title: pageTitle,
       meta_description: metaDescription,
       detected_language: detectedLanguage,
@@ -563,6 +604,102 @@ async function fetchWithZyte(url: string, signal?: AbortSignal): Promise<StaticF
       status: "error", html: null, finalUrl: null, statusCode: null, responseHeaders: {},
       error: err instanceof Error ? err.message : String(err),
     };
+  }
+}
+
+// ─── ScrapeGraph AI cloud scraper ────────────────────────────────────────────
+// Replaces static fetch + Playwright + Zyte when provider = "scrapegraph".
+// Requests both HTML (for tech fingerprinting) and markdown (as clean corpus).
+// API: https://v2-api.scrapegraphai.com/api/scrape
+// Auth: SGAI-APIKEY header
+
+interface ScrapeGraphResult {
+  status: "ok" | "error";
+  html: string | null;
+  markdown: string | null;
+  finalUrl: string | null;
+  statusCode: number | null;
+  responseHeaders: Record<string, string>;
+  error?: string;
+}
+
+async function fetchWithScrapeGraph(
+  url: string,
+  apiKey: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<ScrapeGraphResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Merge with caller's abort signal if provided
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  try {
+    const res = await fetch("https://v2-api.scrapegraphai.com/api/scrape", {
+      method: "POST",
+      headers: {
+        "SGAI-APIKEY": apiKey,
+        "Content-Type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        formats: [
+          { type: "html", mode: "normal" },
+          { type: "markdown", mode: "normal" },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      const isBlocked = res.status === 403 || (res.status === 422 && errBody.toLowerCase().includes("block"));
+      return {
+        status: "error",
+        html: null,
+        markdown: null,
+        finalUrl: null,
+        statusCode: res.status,
+        responseHeaders: {},
+        error: isBlocked ? `blocked: HTTP ${res.status}` : `HTTP ${res.status}: ${errBody.slice(0, 200)}`,
+      };
+    }
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const html = typeof data.html === "string" ? data.html : null;
+    const markdown = typeof data.markdown === "string" ? data.markdown : null;
+
+    if (!html && !markdown) {
+      return {
+        status: "error",
+        html: null,
+        markdown: null,
+        finalUrl: url,
+        statusCode: res.status,
+        responseHeaders: {},
+        error: "ScrapeGraph returned empty content",
+      };
+    }
+
+    const headers: Record<string, string> = {};
+    res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+
+    return { status: "ok", html, markdown, finalUrl: url, statusCode: 200, responseHeaders: headers };
+  } catch (err) {
+    return {
+      status: "error",
+      html: null,
+      markdown: null,
+      finalUrl: null,
+      statusCode: null,
+      responseHeaders: {},
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -20,6 +20,16 @@ export const ProviderPoolEntrySchema = z.object({
 });
 export type ProviderPoolEntry = z.infer<typeof ProviderPoolEntrySchema>;
 
+export const ScraperProviderSchema = z.enum(["playwright", "scrapegraph"]);
+export type ScraperProvider = z.infer<typeof ScraperProviderSchema>;
+
+export const ScraperSettingsSchema = z.object({
+  provider: ScraperProviderSchema.default("playwright"),
+  sgaiApiKey: z.string().optional().nullable(),
+  sgaiTimeoutMs: z.number().int().min(5000).max(120000).default(30000),
+});
+export type ScraperSettings = z.infer<typeof ScraperSettingsSchema>;
+
 export const AiSettingsSchema = z.object({
   enabled: z.boolean().default(true),
   provider: AiProviderSchema.default("anthropic"),
@@ -35,7 +45,7 @@ export const AiSettingsSchema = z.object({
 
 export type AiSettings = z.infer<typeof AiSettingsSchema>;
 
-type Stored = { ai: AiSettings };
+type Stored = { ai: AiSettings; scraper: ScraperSettings };
 
 const DEFAULTS: Stored = {
   ai: AiSettingsSchema.parse({
@@ -49,6 +59,11 @@ const DEFAULTS: Stored = {
     apiKey: null,
     poolStrategy: "off",
     providerPool: [],
+  }),
+  scraper: ScraperSettingsSchema.parse({
+    provider: "playwright",
+    sgaiApiKey: null,
+    sgaiTimeoutMs: 30000,
   }),
 };
 
@@ -116,6 +131,7 @@ export async function loadAdminSettings(): Promise<{ stored: Stored; persisted: 
     const parsedObj = isRecord(parsed) ? parsed : null;
     const stored: Stored = {
       ai: AiSettingsSchema.parse(parsedObj && "ai" in parsedObj ? parsedObj.ai : DEFAULTS.ai),
+      scraper: ScraperSettingsSchema.parse(parsedObj && "scraper" in parsedObj ? parsedObj.scraper : DEFAULTS.scraper),
     };
     cache.stored = stored;
     return { stored, persisted: true };
@@ -127,7 +143,10 @@ export async function loadAdminSettings(): Promise<{ stored: Stored; persisted: 
 
 export async function saveAdminSettings(input: Stored): Promise<{ stored: Stored; persisted: boolean }> {
   const cache = getCache();
-  const stored: Stored = { ai: AiSettingsSchema.parse(input.ai) };
+  const stored: Stored = {
+    ai: AiSettingsSchema.parse(input.ai),
+    scraper: ScraperSettingsSchema.parse(input.scraper ?? DEFAULTS.scraper),
+  };
   cache.stored = stored;
 
   const key = normalizeKey();

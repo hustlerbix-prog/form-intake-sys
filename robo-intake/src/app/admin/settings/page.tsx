@@ -23,6 +23,12 @@ type AiSettings = {
   providerPool: ProviderPoolEntry[];
 };
 
+type ScraperSettings = {
+  provider: "playwright" | "scrapegraph";
+  sgaiApiKey: string | null;
+  sgaiTimeoutMs: number;
+};
+
 const FREE_MODEL_PRESETS: { label: string; entry: ProviderPoolEntry }[] = [
   { label: "Gemma 4 31B", entry: { provider: "openrouter", model: "google/gemma-4-31b-it:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
   { label: "Nemotron 120B", entry: { provider: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free", baseUrl: "https://openrouter.ai/api/v1", apiKey: null } },
@@ -32,7 +38,7 @@ const FREE_MODEL_PRESETS: { label: string; entry: ProviderPoolEntry }[] = [
   { label: "DeepSeek Chat", entry: { provider: "deepseek", model: "deepseek-chat", baseUrl: null, apiKey: null } },
 ];
 
-type SettingsResponse = { persisted: boolean; ai: AiSettings };
+type SettingsResponse = { persisted: boolean; ai: AiSettings; scraper: ScraperSettings };
 
 const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
   anthropic: [
@@ -79,6 +85,7 @@ export default function AdminSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ai, setAi] = useState<AiSettings | null>(null);
+  const [scraper, setScraper] = useState<ScraperSettings | null>(null);
 
   useEffect(() => {
     try {
@@ -105,6 +112,7 @@ export default function AdminSettingsPage() {
     const data = (await res.json()) as SettingsResponse;
     setPersisted(data.persisted);
     setAi(data.ai);
+    setScraper(data.scraper ?? { provider: "playwright", sgaiApiKey: null, sgaiTimeoutMs: 30000 });
     setLoading(false);
   }, [headers]);
 
@@ -120,7 +128,7 @@ export default function AdminSettingsPage() {
       const res = await fetch("/api/admin/ai-settings", {
         method: "PUT",
         headers,
-        body: JSON.stringify({ ai }),
+        body: JSON.stringify({ ai, scraper }),
       });
       if (!res.ok) {
         setError((await res.text()) || "Failed to save settings");
@@ -130,6 +138,7 @@ export default function AdminSettingsPage() {
       const data = (await res.json()) as SettingsResponse;
       setPersisted(data.persisted);
       setAi(data.ai);
+      setScraper(data.scraper ?? { provider: "playwright", sgaiApiKey: null, sgaiTimeoutMs: 30000 });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) {
@@ -137,7 +146,7 @@ export default function AdminSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [ai, headers, token]);
+  }, [ai, scraper, headers, token]);
 
   const isAnthropic = ai?.provider === "anthropic";
   const baseUrlPlaceholder = (() => {
@@ -213,6 +222,81 @@ export default function AdminSettingsPage() {
             Settings saved successfully.
           </div>
         )}
+
+        {/* Web Scraper settings */}
+        <div className="mt-8 rounded-xl border border-slate-700 bg-slate-800/50 p-6">
+          <h2 className="text-lg font-bold text-white mb-1">Web Scraper</h2>
+          <p className="text-xs text-slate-400 mb-5">
+            Controls how prospect websites are fetched. ScrapeGraph AI handles JS-rendered pages and anti-bot protection automatically.
+          </p>
+
+          {loading || !scraper ? (
+            <div className="text-sm text-slate-400">Loading…</div>
+          ) : (
+            <div className="space-y-5">
+              {/* Provider selector */}
+              <div className="flex gap-2">
+                {(["playwright", "scrapegraph"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setScraper({ ...scraper, provider: p })}
+                    className={
+                      "px-4 py-2 rounded-lg border text-sm font-semibold transition " +
+                      (scraper.provider === p
+                        ? "bg-teal border-teal text-navy"
+                        : "border-slate-600 text-slate-300 hover:border-slate-400")
+                    }
+                  >
+                    {p === "playwright" ? "Playwright (built-in)" : "ScrapeGraph AI"}
+                  </button>
+                ))}
+              </div>
+
+              {scraper.provider === "playwright" && (
+                <p className="text-xs text-slate-400">
+                  Uses static fetch + Playwright headless + Zyte fallback. Requires Playwright installed locally or on your server. Good for most sites; may fail on heavy JS or bot-protected pages.
+                </p>
+              )}
+
+              {scraper.provider === "scrapegraph" && (
+                <>
+                  <p className="text-xs text-slate-400">
+                    ScrapeGraph AI cloud API — handles JS rendering, anti-bot bypass, and proxy rotation automatically. Get your API key at{" "}
+                    <span className="text-teal font-mono">dashboard.scrapegraphai.com</span>.
+                    Alternatively set <code className="font-mono text-teal">SGAI_API_KEY</code> as an env var.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Field label="ScrapeGraph API key">
+                      <input
+                        value={scraper.sgaiApiKey ?? ""}
+                        onChange={(e) => setScraper({ ...scraper, sgaiApiKey: e.target.value || null })}
+                        className="h-11 w-full rounded-lg border border-slate-600 bg-slate-700 px-3 text-sm text-slate-50 placeholder:text-slate-300"
+                        placeholder="SGAI-…"
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      {scraper.sgaiApiKey?.includes("•") && (
+                        <p className="mt-1 text-xs text-slate-300">Currently: {scraper.sgaiApiKey}</p>
+                      )}
+                    </Field>
+                    <Field label="Per-page timeout (ms)">
+                      <input
+                        value={String(scraper.sgaiTimeoutMs)}
+                        onChange={(e) => setScraper({ ...scraper, sgaiTimeoutMs: Number(e.target.value || 30000) })}
+                        className="h-11 w-full rounded-lg border border-slate-600 bg-slate-700 px-3 text-sm text-slate-50 placeholder:text-slate-300"
+                        inputMode="numeric"
+                        placeholder="30000"
+                      />
+                      <p className="mt-1 text-xs text-slate-300">30000 ms recommended. ScrapeGraph renders JS before returning.</p>
+                    </Field>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="mt-8 rounded-xl border border-slate-700 bg-slate-800/50 p-6">
           {/* Enabled toggle */}
