@@ -45,6 +45,7 @@ type AgentConfig = {
   language: "en" | "es" | "bilingual";
   tone: "professional" | "friendly" | "formal" | "casual" | "empathetic";
   fallback: "escalate" | "apologise" | "redirect";
+  conversation_starter: "assistant" | "visitor";
   system_prompt: string;
   rag_active: boolean;
   lead_capture: boolean;
@@ -251,14 +252,23 @@ function fileSafeName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function buildInitialChatMessages(starter: "assistant" | "visitor"): ChatMsg[] {
+  if (starter === "visitor") return [];
+  return [
+    {
+      role: "assistant",
+      content: "Test mode is active. Ask a question to see how the agent responds with your current draft config + KB.",
+    },
+  ];
+}
+
 export default function BuilderStep5() {
   const { agentId } = useParams<{ agentId: string }>();
   const router = useRouter();
   const retellClientRef = useRef<RetellWebClient | null>(null);
+  const chatInitRef = useRef(false);
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: "assistant", content: "Test mode is active. Ask a question to see how the agent responds with your current draft config + KB." },
-  ]);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -314,6 +324,10 @@ export default function BuilderStep5() {
       if (agentRes.ok && agentData) {
         setAgent(agentData);
         setVoiceFunctions(extractVoiceFunctions(agentData.flow_graph));
+        if (!chatInitRef.current) {
+          setMessages(buildInitialChatMessages(agentData.config.conversation_starter));
+          chatInitRef.current = true;
+        }
       }
       if (integrationsRes.ok && integrationsData) {
         setProviderReadiness(integrationsData.provider_readiness ?? []);
@@ -897,6 +911,13 @@ export default function BuilderStep5() {
               <div className="text-slateText">Step 5 — Prompt, functions, and live call simulation</div>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.push(`/builder/${agentId}/analysis`)}
+                className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
+              >
+                View analysis
+              </button>
               <button
                 type="button"
                 onClick={() => router.push(`/builder/${agentId}/step4`)}
@@ -1888,6 +1909,13 @@ export default function BuilderStep5() {
           <div className="flex items-center gap-3">
             <button
               type="button"
+              onClick={() => router.push(`/builder/${agentId}/analysis`)}
+              className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
+            >
+              View analysis
+            </button>
+            <button
+              type="button"
               onClick={() => router.push(`/builder/${agentId}/step4`)}
               className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
             >
@@ -1904,18 +1932,31 @@ export default function BuilderStep5() {
         </div>
 
         <div className="rounded-xl border border-navy-600 bg-navy-900/40 p-5 mb-4">
+          <div className="mb-4 rounded-lg border border-navy-600 bg-navy-800/50 px-4 py-3 text-sm text-slateText">
+            Conversation start:
+            {" "}
+            <span className="font-semibold text-white">
+              {agent?.config.conversation_starter === "visitor" ? "Visitor starts first" : "Assistant starts first"}
+            </span>
+          </div>
           <div className="space-y-3 max-h-[420px] overflow-y-auto pr-2">
-            {messages.map((m, idx) => (
-              <div
-                key={idx}
-                className={
-                  "rounded-lg px-4 py-3 text-sm whitespace-pre-line " +
-                  (m.role === "user" ? "bg-teal/15 text-white ml-10 border border-teal/30" : "bg-navy-800 text-white/90 mr-10 border border-navy-600")
-                }
-              >
-                {m.content}
+            {messages.length ? (
+              messages.map((m, idx) => (
+                <div
+                  key={idx}
+                  className={
+                    "rounded-lg px-4 py-3 text-sm whitespace-pre-line " +
+                    (m.role === "user" ? "bg-teal/15 text-white ml-10 border border-teal/30" : "bg-navy-800 text-white/90 mr-10 border border-navy-600")
+                  }
+                >
+                  {m.content}
+                </div>
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed border-navy-500 px-4 py-6 text-sm text-slateText">
+                Visitor starts this conversation. Type the first message below to begin the chat flow.
               </div>
-            ))}
+            )}
           </div>
 
           <div className="mt-4 flex gap-2">

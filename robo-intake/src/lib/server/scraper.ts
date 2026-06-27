@@ -630,6 +630,13 @@ interface ScrapeGraphResult {
   error?: string;
 }
 
+type ScrapeGraphNormalizedContent = {
+  html: string | null;
+  markdown: string | null;
+  finalUrl: string | null;
+  statusCode: number | null;
+};
+
 async function fetchWithScrapeGraph(
   url: string,
   apiKey: string,
@@ -661,6 +668,18 @@ async function fetchWithScrapeGraph(
       signal: controller.signal,
     });
 
+    //#region debug-point sgai-http-response
+    await appendJsonlLog({
+      file: "scraper.log",
+      event: "debug_sgai_http_response",
+      fields: {
+        url,
+        ok: res.ok,
+        status_code: res.status,
+      },
+    });
+    //#endregion
+
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
       const isBlocked = res.status === 403 || (res.status === 422 && errBody.toLowerCase().includes("block"));
@@ -677,18 +696,35 @@ async function fetchWithScrapeGraph(
 
     const data = (await res.json()) as Record<string, unknown>;
 
-    // API v2 shape: { status, data: { results: { html?, markdown? }, metadata }, elapsed_ms }
-    // Also handle flat shape { html?, markdown? } for forward-compat
+    // Accept both the legacy nested shape and the current Scrape service shape.
+    const normalized = normalizeScrapeGraphPayload(data, url);
     const inner = (data.data as Record<string, unknown> | undefined) ?? data;
     const results = (inner.results as Record<string, unknown> | undefined) ?? inner;
+
+    //#region debug-point sgai-response-shape
+    await appendJsonlLog({
+      file: "scraper.log",
+      event: "debug_sgai_response_shape",
+      fields: {
+        url,
+        top_level_keys: Object.keys(data).slice(0, 20),
+        inner_keys: Object.keys(inner).slice(0, 20),
+        results_keys: Object.keys(results).slice(0, 20),
+        data_status: typeof data.status === "string" ? data.status : null,
+        has_html: Boolean(normalized.html),
+        has_markdown: Boolean(normalized.markdown),
+        sample: JSON.stringify(data).slice(0, 800),
+      },
+    });
+    //#endregion
 
     if (data.status === "error") {
       const errMsg = typeof data.error === "string" ? data.error : "ScrapeGraph API error";
       return { status: "error", html: null, markdown: null, finalUrl: url, statusCode: res.status, responseHeaders: {}, error: errMsg };
     }
 
-    const html = typeof results.html === "string" ? results.html : null;
-    const markdown = typeof results.markdown === "string" ? results.markdown : null;
+    const html = normalized.html;
+    const markdown = normalized.markdown;
 
     if (!html && !markdown) {
       return {
@@ -705,7 +741,14 @@ async function fetchWithScrapeGraph(
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
 
-    return { status: "ok", html, markdown, finalUrl: url, statusCode: 200, responseHeaders: headers };
+    return {
+      status: "ok",
+      html,
+      markdown,
+      finalUrl: normalized.finalUrl ?? url,
+      statusCode: normalized.statusCode ?? res.status,
+      responseHeaders: headers,
+    };
   } catch (err) {
     return {
       status: "error",
@@ -719,6 +762,83 @@ async function fetchWithScrapeGraph(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function normalizeScrapeGraphPayload(
+  data: Record<string, unknown>,
+  fallbackUrl: string
+): ScrapeGraphNormalizedContent {
+  const out: ScrapeGraphNormalizedContent = {
+    html: null,
+    markdown: null,
+    finalUrl: fallbackUrl,
+    statusCode: null,
+  };
+
+  const visited = new Set<unknown>();
+
+  const visit = (value: unknown, depth: number) => {
+    if (!value || depth > 4 || visited.has(value)) return;
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+
+    if (typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+
+    const html = coerceScrapeGraphText(record.html);
+    if (!out.html && html) out.html = html;
+
+    const markdown = coerceScrapeGraphText(record.markdown);
+    if (!out.markdown && markdown) out.markdown = markdown;
+
+    const format = typeof record.format === "string" ? record.format.toLowerCase() : null;
+    const content = coerceScrapeGraphText(record.content);
+    if (format === "html" && content && !out.html) out.html = content;
+    if (format === "markdown" && content && !out.markdown) out.markdown = content;
+
+    const finalUrl =
+      typeof record.finalUrl === "string" ? record.finalUrl :
+      typeof record.final_url === "string" ? record.final_url :
+      typeof record.url === "string" ? record.url :
+      null;
+    if (!out.finalUrl && finalUrl) out.finalUrl = finalUrl;
+
+    const statusCode =
+      typeof record.statusCode === "number" ? record.statusCode :
+      typeof record.status_code === "number" ? record.status_code :
+      typeof record.http_status === "number" ? record.http_status :
+      null;
+    if (out.statusCode == null && statusCode != null) out.statusCode = statusCode;
+
+    visit(record.data, depth + 1);
+    visit(record.result, depth + 1);
+    visit(record.results, depth + 1);
+    visit(record.metadata, depth + 1);
+    visit(record.outputs, depth + 1);
+    visit(record.items, depth + 1);
+    if (record.content && typeof record.content === "object") visit(record.content, depth + 1);
+  };
+
+  visit(data, 0);
+  return out;
+}
+
+function coerceScrapeGraphText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text ? text : null;
+  }
+
+  if (Array.isArray(value)) {
+    const text = value.filter((item): item is string => typeof item === "string").join("\n").trim();
+    return text ? text : null;
+  }
+
+  return null;
 }
 
 // ─── Tech profile detection ───────────────────────────────────────────────────

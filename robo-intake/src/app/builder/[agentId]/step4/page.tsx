@@ -9,6 +9,7 @@ type AgentConfig = {
   language: "en" | "es" | "bilingual";
   tone: "professional" | "friendly" | "formal" | "casual" | "empathetic";
   fallback: "escalate" | "apologise" | "redirect";
+  conversation_starter: "assistant" | "visitor";
   system_prompt: string;
   rag_active: boolean;
   lead_capture: boolean;
@@ -91,6 +92,13 @@ export default function BuilderStep4() {
             <div className="text-slateText">Step 4 — Configure</div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push(`/builder/${agentId}/analysis`)}
+              className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
+            >
+              View analysis
+            </button>
             <button
               type="button"
               onClick={() => router.push(`/builder/${agentId}/step3`)}
@@ -195,6 +203,24 @@ export default function BuilderStep4() {
                 className="w-full h-11 rounded-lg bg-navy-800 border border-navy-600 px-3 text-white"
               />
             </div>
+            {agent?.type === "chatbot" ? (
+              <div>
+                <div className="text-white font-semibold mb-2">Conversation start</div>
+                <select
+                  value={agent?.config.conversation_starter ?? "assistant"}
+                  disabled={busy}
+                  onChange={(e) =>
+                    void patch({
+                      conversation_starter: e.target.value as AgentConfig["conversation_starter"],
+                    })
+                  }
+                  className="w-full h-11 rounded-lg bg-navy-800 border border-navy-600 px-3 text-white"
+                >
+                  <option value="assistant">Assistant starts</option>
+                  <option value="visitor">Visitor starts</option>
+                </select>
+              </div>
+            ) : null}
             <div>
               <div className="text-white font-semibold mb-2">Max tokens</div>
               <input

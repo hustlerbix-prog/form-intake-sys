@@ -49,6 +49,7 @@ export type AgentConfig = {
   language: AgentLanguage;
   tone: AgentTone;
   fallback: FallbackBehaviour;
+  conversation_starter: "assistant" | "visitor";
   system_prompt: string;
   rag_active: boolean;
   lead_capture: boolean;
@@ -410,6 +411,7 @@ function baseConfig(input: { name: string }): AgentConfig {
     language: "en",
     tone: "professional",
     fallback: "escalate",
+    conversation_starter: "assistant",
     system_prompt: "You are a helpful AI assistant for this business. Be accurate, concise, and operational.",
     rag_active: true,
     lead_capture: true,

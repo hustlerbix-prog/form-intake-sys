@@ -16,27 +16,41 @@ export default function AnalysePage() {
     const detected = navigator.language.startsWith("es") ? "es" : "en";
     setLanguage(detected);
 
+    const params = new URLSearchParams(window.location.search);
+    const requestedProfileId = params.get("profile_id");
+    const shouldOpenReport = params.get("view") === "report";
+
     const storedRaw = localStorage.getItem("robo_session");
     const stored = storedRaw ? (JSON.parse(storedRaw) as { profileId: string; expiresAt: string }) : null;
     const storedValid = stored && new Date(stored.expiresAt).getTime() > Date.now();
+    const resumeProfileId = requestedProfileId || (storedValid ? stored?.profileId : undefined);
 
     fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         language: detected,
-        source_product_id: new URLSearchParams(window.location.search).get("product") ?? undefined,
-        profile_id: storedValid ? stored?.profileId : undefined,
+        source_product_id: params.get("product") ?? undefined,
+        profile_id: resumeProfileId,
       }),
     })
       .then((r) => r.json())
-      .then((data: { profile_id: string; expires_at: string }) => {
+      .then(async (data: { profile_id: string; expires_at: string }) => {
         setProfileId(data.profile_id);
         setExpiresAt(data.expires_at);
         localStorage.setItem(
           "robo_session",
           JSON.stringify({ profileId: data.profile_id, expiresAt: data.expires_at })
         );
+
+        if (!shouldOpenReport) return;
+
+        const statusRes = await fetch(`/api/pipeline-status?profile_id=${encodeURIComponent(data.profile_id)}`);
+        if (!statusRes.ok) return;
+        const status = (await statusRes.json()) as { submitted?: boolean };
+        if (status.submitted) {
+          setSubmitted(true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -70,4 +84,3 @@ export default function AnalysePage() {
     </div>
   );
 }
-

@@ -6,6 +6,8 @@ import {
   PaymentSettingsSchema,
 } from "@/lib/server/paymentSettings";
 
+export const dynamic = "force-dynamic";
+
 function processorStatus() {
   return {
     stripe: {

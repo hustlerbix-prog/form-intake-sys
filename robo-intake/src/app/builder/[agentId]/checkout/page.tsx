@@ -157,13 +157,22 @@ export default function BuilderCheckoutGate() {
             <div className="text-white font-syne text-3xl font-bold mb-1">AI Builder</div>
             <div className="text-slateText">Step 6 — Checkout</div>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push(`/builder/${agentId}/step5`)}
-            className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
-          >
-            Back
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push(`/builder/${agentId}/analysis`)}
+              className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
+            >
+              View analysis
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push(`/builder/${agentId}/step5`)}
+              className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition"
+            >
+              Back
+            </button>
+          </div>
         </div>
 
         {/* Ready banner */}

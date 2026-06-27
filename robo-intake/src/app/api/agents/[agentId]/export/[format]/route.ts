@@ -35,13 +35,22 @@ function buildApiArtefact(agentId: string, apiKey: string) {
   };
 }
 
-function buildWidgetArtefact(agentId: string, options: { primaryColor: string; position: "bottom-right" | "bottom-left"; greeting: string }) {
+function buildWidgetArtefact(
+  agentId: string,
+  options: {
+    primaryColor: string;
+    position: "bottom-right" | "bottom-left";
+    greeting: string;
+    conversationStarter: "assistant" | "visitor";
+  }
+) {
   const cdnUrl = process.env.NEXT_PUBLIC_WIDGET_CDN ?? "https://roboai.agency/widget.js";
   const attrs = [
     `data-agent="${agentId}"`,
     `data-color="${options.primaryColor}"`,
     `data-position="${options.position}"`,
     `data-greeting="${options.greeting}"`,
+    `data-conversation-starter="${options.conversationStarter}"`,
   ].join(" ");
   return {
     embed_snippet: `<script src="${cdnUrl}" ${attrs} async></script>`,
@@ -72,10 +81,17 @@ export async function POST(req: NextRequest, { params }: { params: { agentId: st
       };
     }
   } else if (params.format === "widget") {
+    const conversationStarter = snapshot.config.conversation_starter ?? "assistant";
     artefactData = buildWidgetArtefact(params.agentId, {
       primaryColor: typeof body.primaryColor === "string" ? body.primaryColor : "#0EA5A0",
       position: body.position === "bottom-left" ? "bottom-left" : "bottom-right",
-      greeting: typeof body.greeting === "string" ? body.greeting : "Hi! How can I help?",
+      greeting:
+        typeof body.greeting === "string"
+          ? body.greeting
+          : conversationStarter === "assistant"
+            ? "Hi! How can I help?"
+            : "",
+      conversationStarter,
     });
   } else if (params.format === "rawcode") {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";

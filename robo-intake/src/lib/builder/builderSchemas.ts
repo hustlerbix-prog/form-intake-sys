@@ -9,6 +9,7 @@ export const AgentConfigSchema = z.object({
   language: z.enum(["en", "es", "bilingual"]),
   tone: z.enum(["professional", "friendly", "formal", "casual", "empathetic"]),
   fallback: z.enum(["escalate", "apologise", "redirect"]),
+  conversation_starter: z.enum(["assistant", "visitor"]),
   system_prompt: z.string().min(1).max(4000),
   rag_active: z.boolean(),
   lead_capture: z.boolean(),

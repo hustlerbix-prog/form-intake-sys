@@ -62,14 +62,10 @@ export default function BuilderStep1() {
           <button
             type="button"
             disabled={busy}
-            onClick={() =>
-              router.push(
-                agent?.profile_id ? `/builder/start?profile_id=${encodeURIComponent(agent.profile_id)}` : "/builder/start"
-              )
-            }
+            onClick={() => router.push(`/builder/${agentId}/analysis`)}
             className="h-11 px-5 rounded-lg border border-navy-500 text-white font-bold hover:border-teal/40 hover:text-teal transition disabled:opacity-50"
           >
-            Back
+            View analysis
           </button>
         </div>
 
